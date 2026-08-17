@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { CommentCommands } from "./comments";
 import { HighlightRenderer } from "./decorations";
+import { FileCommentsView } from "./fileview";
 import { HighlightCommands } from "./highlights";
 import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
@@ -22,7 +23,9 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: tree,
     showCollapseAll: true
   });
+  const fileComments = new FileCommentsView(store, live);
   const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
+  void ready.then(() => fileComments.ready());
 
   context.subscriptions.push(
     identity,
@@ -32,6 +35,8 @@ export function activate(context: vscode.ExtensionContext): void {
     threads,
     tree,
     view,
+    fileComments,
+    vscode.window.registerWebviewViewProvider(FileCommentsView.viewId, fileComments),
     vscode.commands.registerCommand("codelight.threadReply", async (reply: vscode.CommentReply) => {
       await ready;
       await threads.reply(reply);

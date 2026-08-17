@@ -25,7 +25,7 @@ export interface CommentNode {
 
 export type Node = FileNode | AnnotationNode | CommentNode;
 
-function basename(file: string): string {
+export function basename(file: string): string {
   const parts = file.split("/");
   return parts[parts.length - 1] ?? file;
 }
