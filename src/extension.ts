@@ -22,7 +22,7 @@ export function activate(context: vscode.ExtensionContext): void {
   useSwatches(new Swatches(context.globalStorageUri));
   const highlights = new HighlightCommands(store, identity, renderer, live);
   const marker = new MarkerMode(store, renderer, highlights);
-  const status = new FileStatus(store);
+  const status = new FileStatus(store, visibility);
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity, visibility);
   const tree = new AnnotationTree(store);

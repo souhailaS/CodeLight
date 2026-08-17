@@ -77,9 +77,12 @@ export class ThreadView implements vscode.Disposable {
       })
     );
     this.disposables.push(
-      visibility.onDidChange(() => {
+      visibility.onDidChange((shown) => {
         this.controller.commentingRangeProvider = this.rangeProvider();
         this.sync();
+        if (!shown && this.pending.size > 0) {
+          void vscode.window.showInformationMessage("The note you are writing stays open.");
+        }
       })
     );
     this.wire();
@@ -131,10 +134,7 @@ export class ThreadView implements vscode.Disposable {
         }
         this.sync();
       }),
-      this.live.onDidShift((document) => {
-        this.controller.commentingRangeProvider = this.rangeProvider();
-        this.reposition(document);
-      })
+      this.live.onDidShift((document) => this.reposition(document))
     );
     this.sync();
   }
@@ -794,10 +794,11 @@ export class ThreadView implements vscode.Disposable {
         }
       }
     }
+    const hidden = !this.visibility.visible;
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
         const gone = this.store.byId(id) === undefined;
-        if (gone) {
+        if (gone || hidden) {
           for (const entry of thread.comments) {
             if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
               void this.rescueLostEdit(entry);
@@ -805,7 +806,9 @@ export class ThreadView implements vscode.Disposable {
           }
         }
         this.owners.delete(thread);
-        this.drafts.delete(id);
+        if (!hidden) {
+          this.drafts.delete(id);
+        }
         thread.dispose();
         this.threads.delete(id);
       }

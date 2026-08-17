@@ -46,8 +46,12 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(preset?: PaletteColor, only?: readonly vscode.Range[]): Promise<Annotation[]> {
-    const editor = vscode.window.activeTextEditor;
+  async add(
+    preset?: PaletteColor,
+    only?: readonly vscode.Range[],
+    target?: vscode.TextEditor
+  ): Promise<Annotation[]> {
+    const editor = target ?? vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
       return [];

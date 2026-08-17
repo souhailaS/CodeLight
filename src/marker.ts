@@ -114,15 +114,16 @@ export class MarkerMode implements vscode.Disposable {
     if (ranges.length === 0) {
       return;
     }
+    const previous = this.last;
     this.busy = true;
     try {
-      await this.replacePrevious(editor, ranges);
-      const created = await this.highlights.add(color, ranges);
+      const created = await this.highlights.add(color, ranges, editor);
       if (created.length === 0) {
         this.off();
         void vscode.window.showInformationMessage("CodeLight turned the marker off.");
         return;
       }
+      await this.dropPrevious(previous, editor, ranges);
       this.last = {
         id: created[0].id,
         uri: editor.document.uri.toString(),
@@ -134,12 +135,11 @@ export class MarkerMode implements vscode.Disposable {
     this.catchUp(editor, ranges);
   }
 
-  private async replacePrevious(
+  private async dropPrevious(
+    previous: Marked | undefined,
     editor: vscode.TextEditor,
     ranges: readonly vscode.Range[]
   ): Promise<void> {
-    const previous = this.last;
-    this.last = undefined;
     if (!previous || ranges.length !== 1) {
       return;
     }
