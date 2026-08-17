@@ -1,20 +1,40 @@
 import * as vscode from "vscode";
+import { HighlightRenderer } from "./decorations";
+import { HighlightCommands } from "./highlights";
 import { IdentityProvider } from "./identity";
+import { LiveRanges } from "./live";
 import { AnnotationStore } from "./store";
 
 export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
   const store = new AnnotationStore();
+  const live = new LiveRanges(store);
+  const renderer = new HighlightRenderer(store, live);
+  const highlights = new HighlightCommands(store, identity, renderer, live);
   const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
 
   context.subscriptions.push(
     identity,
     store,
+    live,
+    renderer,
     vscode.commands.registerCommand("codelight.signIn", async () => {
       const account = await identity.require();
       if (account) {
         void vscode.window.showInformationMessage(`CodeLight is signed in as ${account.login}.`);
       }
+    }),
+    vscode.commands.registerCommand("codelight.addHighlight", async () => {
+      await ready;
+      await highlights.add();
+    }),
+    vscode.commands.registerCommand("codelight.removeHighlight", async () => {
+      await ready;
+      await highlights.remove();
+    }),
+    vscode.commands.registerCommand("codelight.changeColor", async () => {
+      await ready;
+      await highlights.recolor();
     }),
     vscode.commands.registerCommand("codelight.showStatus", async () => {
       await ready;
