@@ -177,14 +177,14 @@ export function parseStore(raw: string): ParsedStore {
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
-    throw new Error("codelight.json is not valid JSON");
+    throw new Error("The file is not valid JSON.");
   }
   if (!isRecord(parsed)) {
-    throw new Error("codelight.json must contain an object");
+    throw new Error("The file must contain an object.");
   }
   if (typeof parsed.version === "number" && parsed.version > STORE_VERSION) {
     throw new Error(
-      `codelight.json uses format version ${parsed.version}, this build understands ${STORE_VERSION}. Update the extension.`
+      `The file uses format version ${parsed.version}, this build understands ${STORE_VERSION}. Update the extension.`
     );
   }
   const rawAnnotations = Array.isArray(parsed.annotations) ? parsed.annotations : [];

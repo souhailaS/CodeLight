@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { newId } from "./ids";
 import { Annotation, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
-import { exists, resolveRoot, STORE_PATTERN, storeUri } from "./paths";
+import { exists, isMissingFile, resolveRoot, STORE_PATTERN, storeUri } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
 const MAX_STORE_BYTES = 64 * 1024 * 1024;
@@ -26,17 +26,9 @@ interface StoreFiles {
   fresh: vscode.Uri;
 }
 
-interface ActiveStore {
-  target: vscode.Uri;
-  duplicate: boolean;
-}
-
-function isMissingFile(error: unknown): boolean {
-  if (error instanceof vscode.FileSystemError) {
-    return error.code === "FileNotFound";
-  }
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
-}
+type Choice =
+  | { status: "ok"; target: vscode.Uri; duplicate: boolean }
+  | { status: "error"; message: string };
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -53,6 +45,8 @@ function decodeStore(bytes: Uint8Array, target: vscode.Uri): string {
     : buffer.toString("utf8");
   return text.replace(/^\uFEFF/, "");
 }
+
+const TEMPORARY_NAME = /^codelight\.write-.+\.tmp$/;
 
 function temporaryName(): string {
   return `codelight.write-${newId()}.tmp`;
@@ -167,6 +161,10 @@ export class AnnotationStore implements vscode.Disposable {
     if (generation !== this.generation) {
       return false;
     }
+    if (chosen.status === "error") {
+      this.reportFailure(chosen.message);
+      return false;
+    }
     if (chosen.duplicate) {
       void vscode.window.showWarningMessage(
         `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. Remove the one you do not want before converting.`
@@ -265,19 +263,29 @@ export class AnnotationStore implements vscode.Disposable {
     };
   }
 
-  private async pick(files: StoreFiles): Promise<ActiveStore> {
-    const hasPlain = await exists(files.plain);
-    const hasCompressed = await exists(files.compressed);
-    if (hasPlain && hasCompressed) {
-      return { target: files.plain, duplicate: true };
+  private async pick(files: StoreFiles): Promise<Choice> {
+    let hasPlain = false;
+    let hasCompressed = false;
+    try {
+      hasPlain = await exists(files.plain);
+    } catch (error) {
+      return { status: "error", message: `CodeLight could not check ${files.plain.fsPath}. ${describe(error)}` };
+    }
+    try {
+      hasCompressed = await exists(files.compressed);
+    } catch (error) {
+      return {
+        status: "error",
+        message: `CodeLight could not check ${files.compressed.fsPath}. ${describe(error)}`
+      };
     }
     if (hasCompressed) {
-      return { target: files.compressed, duplicate: false };
+      return { status: "ok", target: files.compressed, duplicate: hasPlain };
     }
     if (hasPlain) {
-      return { target: files.plain, duplicate: false };
+      return { status: "ok", target: files.plain, duplicate: false };
     }
-    return { target: files.fresh, duplicate: false };
+    return { status: "ok", target: this.active ?? files.fresh, duplicate: false };
   }
 
   private async commit(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
@@ -292,6 +300,10 @@ export class AnnotationStore implements vscode.Disposable {
       }
       const chosen = await this.pick(files);
       if (generation !== this.generation) {
+        return false;
+      }
+      if (chosen.status === "error") {
+        this.reportFailure(chosen.message);
         return false;
       }
       this.warnAboutDuplicate(chosen.duplicate, files);
@@ -381,6 +393,7 @@ export class AnnotationStore implements vscode.Disposable {
       this.emitter.fire();
       return;
     }
+    await this.sweep(root);
     const pattern = new vscode.RelativePattern(root, STORE_PATTERN);
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     watcher.onDidCreate(() => this.scheduleReload());
@@ -412,6 +425,10 @@ export class AnnotationStore implements vscode.Disposable {
       }
       const chosen = await this.pick(files);
       if (generation !== this.generation) {
+        return;
+      }
+      if (chosen.status === "error") {
+        this.reportFailure(chosen.message);
         return;
       }
       this.warnAboutDuplicate(chosen.duplicate, files);
@@ -459,6 +476,22 @@ export class AnnotationStore implements vscode.Disposable {
     }
   }
 
+  private async sweep(root: vscode.Uri): Promise<void> {
+    const folder = vscode.Uri.joinPath(root, ".vscode");
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(folder);
+    } catch {
+      return;
+    }
+    for (const [name, type] of entries) {
+      if (type !== vscode.FileType.File || !TEMPORARY_NAME.test(name)) {
+        continue;
+      }
+      await this.cleanup(vscode.Uri.joinPath(folder, name));
+    }
+  }
+
   private async cleanup(temporary: vscode.Uri): Promise<void> {
     try {
       await vscode.workspace.fs.delete(temporary);
@@ -498,7 +531,7 @@ export class AnnotationStore implements vscode.Disposable {
     }
     this.reportedDuplicate = true;
     void vscode.window.showWarningMessage(
-      `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${files.plain.fsPath} and leaving the other file alone.`
+      `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${files.compressed.fsPath} and leaving the other file alone.`
     );
   }
 

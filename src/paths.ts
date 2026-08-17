@@ -16,20 +16,34 @@ export function storeUri(root: vscode.Uri, mode: StorageMode): vscode.Uri {
   return vscode.Uri.joinPath(root, ".vscode", STORE_NAMES[mode]);
 }
 
+export function isMissingFile(error: unknown): boolean {
+  if (error instanceof vscode.FileSystemError) {
+    return error.code === "FileNotFound";
+  }
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
+}
+
 export async function exists(target: vscode.Uri): Promise<boolean> {
   try {
     await vscode.workspace.fs.stat(target);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return false;
+    }
+    throw error;
   }
 }
 
 async function hasStore(root: vscode.Uri): Promise<boolean> {
-  if (await exists(storeUri(root, "json"))) {
-    return true;
+  try {
+    if (await exists(storeUri(root, "json"))) {
+      return true;
+    }
+    return await exists(storeUri(root, "compressed"));
+  } catch {
+    return false;
   }
-  return exists(storeUri(root, "compressed"));
 }
 
 export async function resolveRoot(preferred?: vscode.Uri): Promise<vscode.Uri | undefined> {
