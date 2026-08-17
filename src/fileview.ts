@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
-import { LiveRanges } from "./live";
+import { LiveRanges, SpanMap } from "./live";
 import { Comment } from "./model";
 import { readPalette } from "./palette";
 import { basename } from "./panel";
@@ -22,6 +22,22 @@ interface Card {
 interface FileCards {
   file: string;
   cards: Card[];
+}
+
+interface CardView {
+  id: string;
+  html: string;
+}
+
+interface Content {
+  head: string;
+  note: string;
+  cards: CardView[];
+}
+
+interface Payload extends Content {
+  type: "cards";
+  key: string;
 }
 
 function escapeHtml(value: string): string {
@@ -68,24 +84,94 @@ function styles(): string {
 function script(): string {
   return [
     "const bridge = acquireVsCodeApi();",
-    "const key = document.body.dataset.key;",
-    "const saved = bridge.getState();",
-    "if (saved && saved.key === key && typeof saved.scroll === 'number') {",
-    "  window.scrollTo(0, saved.scroll);",
-    "}",
-    "window.addEventListener('scroll', () => {",
-    "  bridge.setState({ key: key, scroll: window.scrollY });",
-    "});",
-    "for (const card of document.querySelectorAll('.card')) {",
-    "  const send = () => bridge.postMessage({ type: 'reveal', id: card.dataset.id });",
-    "  card.addEventListener('click', send);",
-    "  card.addEventListener('keydown', (event) => {",
-    "    if (event.key === 'Enter' || event.key === ' ') {",
-    "      event.preventDefault();",
-    "      send();",
+    "const header = document.getElementById('header');",
+    "const list = document.getElementById('list');",
+    "const note = document.getElementById('note');",
+    "const nodes = new Map();",
+    "let shown = '';",
+    "let headHtml = '';",
+    "let noteHtml = '';",
+    "let queued = false;",
+    "const build = (html) => {",
+    "  const holder = document.createElement('template');",
+    "  holder.innerHTML = html;",
+    "  return holder.content.firstElementChild;",
+    "};",
+    "const patch = (cards) => {",
+    "  const alive = new Set();",
+    "  let index = 0;",
+    "  for (const card of cards) {",
+    "    alive.add(card.id);",
+    "    let entry = nodes.get(card.id);",
+    "    if (!entry || entry.html !== card.html) {",
+    "      entry = { node: build(card.html), html: card.html };",
+    "      nodes.set(card.id, entry);",
     "    }",
+    "    if (list.children[index] !== entry.node) {",
+    "      list.insertBefore(entry.node, list.children[index] || null);",
+    "    }",
+    "    index += 1;",
+    "  }",
+    "  while (list.children.length > cards.length) {",
+    "    list.removeChild(list.lastElementChild);",
+    "  }",
+    "  for (const id of [...nodes.keys()]) {",
+    "    if (!alive.has(id)) {",
+    "      nodes.delete(id);",
+    "    }",
+    "  }",
+    "};",
+    "const reveal = (target) => {",
+    "  const card = target instanceof Element ? target.closest('.card') : null;",
+    "  if (!card) {",
+    "    return false;",
+    "  }",
+    "  bridge.postMessage({ type: 'reveal', id: card.dataset.id });",
+    "  return true;",
+    "};",
+    "list.addEventListener('click', (event) => {",
+    "  reveal(event.target);",
+    "});",
+    "list.addEventListener('keydown', (event) => {",
+    "  if (event.key !== 'Enter' && event.key !== ' ') {",
+    "    return;",
+    "  }",
+    "  if (reveal(event.target)) {",
+    "    event.preventDefault();",
+    "  }",
+    "});",
+    "window.addEventListener('scroll', () => {",
+    "  if (queued) {",
+    "    return;",
+    "  }",
+    "  queued = true;",
+    "  requestAnimationFrame(() => {",
+    "    queued = false;",
+    "    bridge.setState({ key: shown, scroll: window.scrollY });",
     "  });",
-    "}"
+    "});",
+    "window.addEventListener('message', (event) => {",
+    "  const data = event.data;",
+    "  if (!data || data.type !== 'cards') {",
+    "    return;",
+    "  }",
+    "  if (headHtml !== data.head) {",
+    "    headHtml = data.head;",
+    "    header.innerHTML = data.head;",
+    "  }",
+    "  if (noteHtml !== data.note) {",
+    "    noteHtml = data.note;",
+    "    note.innerHTML = data.note;",
+    "  }",
+    "  patch(data.cards);",
+    "  if (shown !== data.key) {",
+    "    shown = data.key;",
+    "    const saved = bridge.getState();",
+    "    const same = saved && saved.key === shown && typeof saved.scroll === 'number';",
+    "    window.scrollTo(0, same ? saved.scroll : 0);",
+    "  }",
+    "});",
+    "bridge.postMessage({ type: 'ready' });"
   ].join("\n");
 }
 
@@ -137,6 +223,9 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   private nonce = createNonce();
   private tracked: vscode.TextEditor | undefined;
   private shown: string | undefined;
+  private sent: string | undefined;
+  private spansKey: string | undefined;
+  private spans: SpanMap | undefined;
   private shiftTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
@@ -144,10 +233,19 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     private readonly live: LiveRanges
   ) {
     this.disposables.push(
-      store.onDidChange(() => this.render()),
-      live.onDidShift((document) => this.scheduleShift(document)),
+      store.onDidChange(() => {
+        this.forgetSpans();
+        this.render();
+      }),
+      live.onDidShift((document) => {
+        this.forgetSpans();
+        this.scheduleShift(document);
+      }),
       vscode.window.onDidChangeActiveTextEditor(() => this.render()),
-      vscode.window.onDidChangeVisibleTextEditors(() => this.render()),
+      vscode.window.onDidChangeVisibleTextEditors(() => {
+        this.forgetSpans();
+        this.render();
+      }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration("codelight.palette")) {
           this.render();
@@ -166,7 +264,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       view.onDidChangeVisibility(() => this.render()),
       view.onDidDispose(() => this.unbind())
     );
-    this.render();
+    view.webview.html = this.shell(view.webview);
   }
 
   refresh(): void {
@@ -176,15 +274,20 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   private unbind(): void {
     this.view = undefined;
     this.shown = undefined;
+    this.sent = undefined;
     for (const disposable of this.bound) {
       disposable.dispose();
     }
     this.bound = [];
   }
 
+  private forgetSpans(): void {
+    this.spansKey = undefined;
+    this.spans = undefined;
+  }
+
   private scheduleShift(document: vscode.TextDocument): void {
-    const view = this.view;
-    if (!view || !view.visible || this.shown !== document.uri.toString()) {
+    if (this.shown !== document.uri.toString()) {
       return;
     }
     if (this.shiftTimer) {
@@ -201,6 +304,11 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       return;
     }
     const payload = message as { type?: unknown; id?: unknown };
+    if (payload.type === "ready") {
+      this.sent = undefined;
+      this.render();
+      return;
+    }
     if (payload.type !== "reveal" || typeof payload.id !== "string") {
       return;
     }
@@ -210,11 +318,19 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   private render(): void {
     const view = this.view;
     if (!view || !view.visible) {
+      this.shown = undefined;
       return;
     }
     const editor = this.editor();
-    this.shown = editor ? editor.document.uri.toString() : undefined;
-    view.webview.html = this.html(view.webview, editor);
+    const key = editor ? editor.document.uri.toString() : "";
+    this.shown = editor ? key : undefined;
+    const payload: Payload = { type: "cards", key, ...this.content(editor) };
+    const serialized = JSON.stringify(payload);
+    if (serialized === this.sent) {
+      return;
+    }
+    this.sent = serialized;
+    void view.webview.postMessage(payload);
   }
 
   private editor(): vscode.TextEditor | undefined {
@@ -233,6 +349,16 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     return this.tracked;
   }
 
+  private spansFor(document: vscode.TextDocument): SpanMap | undefined {
+    const key = `${document.uri.toString()}@${document.version}`;
+    if (this.spansKey === key) {
+      return this.spans;
+    }
+    this.spans = this.live.spansFor(document);
+    this.spansKey = key;
+    return this.spans;
+  }
+
   private collect(editor: vscode.TextEditor | undefined): FileCards | undefined {
     const root = this.store.rootUri;
     if (!editor || !root) {
@@ -247,7 +373,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     const annotations = this.store
       .forFile(relative)
       .filter((annotation) => annotation.comments.length > 0);
-    const spans = annotations.length > 0 ? this.live.spansFor(document) : undefined;
+    const spans = annotations.length > 0 ? this.spansFor(document) : undefined;
     const cards = annotations
       .map((annotation) => ({
         annotation,
@@ -265,24 +391,38 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     return { file: relative, cards };
   }
 
-  private body(editor: vscode.TextEditor | undefined): string {
+  private content(editor: vscode.TextEditor | undefined): Content {
+    if (!this.store.rootUri) {
+      return { head: "", note: renderNote("CodeLight needs an open folder."), cards: [] };
+    }
     if (this.store.all.length === 0) {
-      return renderNote("This project has no CodeLight annotations yet.");
+      return {
+        head: "",
+        note: renderNote("This project has no CodeLight annotations yet."),
+        cards: []
+      };
     }
     const found = this.collect(editor);
     if (!found) {
-      return renderNote("Open a file from this workspace to see its comments.");
+      return {
+        head: "",
+        note: renderNote("Open a file from this workspace to see its comments."),
+        cards: []
+      };
     }
-    const header = renderHeader(found.file);
+    const head = renderHeader(found.file);
     if (found.cards.length === 0) {
-      return `${header}${renderNote("No comments in this file yet.")}`;
+      return { head, note: renderNote("No comments in this file yet."), cards: [] };
     }
-    return header + found.cards.map(renderCard).join("");
+    return {
+      head,
+      note: "",
+      cards: found.cards.map((card) => ({ id: card.id, html: renderCard(card) }))
+    };
   }
 
-  private html(webview: vscode.Webview, editor: vscode.TextEditor | undefined): string {
+  private shell(webview: vscode.Webview): string {
     const nonce = this.nonce;
-    const key = editor ? editor.document.uri.toString() : "";
     const policy = [
       "default-src 'none'",
       `style-src ${webview.cspSource} 'unsafe-inline'`,
@@ -298,8 +438,10 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       `<style>${styles()}</style>`,
       `<title>This File</title>`,
       `</head>`,
-      `<body data-key="${escapeHtml(key)}">`,
-      this.body(editor),
+      `<body>`,
+      `<div id="header"></div>`,
+      `<div id="list"></div>`,
+      `<div id="note"></div>`,
       `<script nonce="${nonce}">${script()}</script>`,
       `</body>`,
       `</html>`

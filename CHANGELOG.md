@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+A second view in the activity bar lists the comments of the file you are reading, stacked as cards.
+
+* Every commented highlight in the active file, in the order it appears, with its colour, snippet and line.
+* Click a card to jump the editor to that highlight.
+* Threads whose text was deleted stay visible, marked as orphaned rather than quietly dropped.
+* Drag the view into the secondary side bar to keep the comments beside your code.
+
 ## 0.2.0
 
 Comments now open a real threaded widget in the editor instead of a single line prompt.
