@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { StorageMode } from "./paths";
 import { InlineMode } from "./thread";
 
 export interface PaletteColor {
@@ -72,6 +73,11 @@ export function readInlineMode(resource?: vscode.Uri): InlineMode {
   return configured === "off" || configured === "count" || configured === "preview"
     ? configured
     : "preview";
+}
+
+export function readStorageMode(resource?: vscode.Uri): StorageMode {
+  const configured = configuration(resource).get<unknown>("storage");
+  return configured === "compressed" ? "compressed" : "json";
 }
 
 export function resolveColor(palette: readonly PaletteColor[], id: string): PaletteColor {

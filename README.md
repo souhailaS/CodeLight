@@ -42,6 +42,7 @@ Everything else lives in the command palette under **CodeLight**, in the editor 
 | `codelight.palette` | built in colours | The colours offered in the picker |
 | `codelight.highlightOpacity` | `0.3` | How strong the highlight background is |
 | `codelight.inlineComments` | `preview` | Show the latest comment, a count, or nothing |
+| `codelight.storage` | `json` | Keep the store as readable JSON, or as a smaller gzipped file that git cannot diff |
 
 ## Installing
 

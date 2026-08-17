@@ -39,7 +39,8 @@
   },
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:.vscode/codelight.json"
+    "workspaceContains:.vscode/codelight.json",
+    "workspaceContains:.vscode/codelight.json.gz"
   ],
   "contributes": {
     "commands": [
@@ -335,6 +336,19 @@
           "minimum": 0.05,
           "maximum": 1,
           "description": "Opacity of the highlight background."
+        },
+        "codelight.storage": {
+          "type": "string",
+          "default": "json",
+          "enum": [
+            "json",
+            "compressed"
+          ],
+          "enumDescriptions": [
+            "Keep annotations in .vscode/codelight.json as readable text",
+            "Keep annotations in .vscode/codelight.json.gz as gzipped bytes"
+          ],
+          "description": "How the shared annotation file is stored. Compressed storage makes the file much smaller, but it is a binary file that git cannot diff or merge."
         }
       }
     },

@@ -3,17 +3,37 @@ import { isSafeRelativePath } from "./model";
 
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin";
 
-export function storeUri(root: vscode.Uri): vscode.Uri {
-  return vscode.Uri.joinPath(root, ".vscode", "codelight.json");
+export type StorageMode = "json" | "compressed";
+
+const STORE_NAMES: Record<StorageMode, string> = {
+  json: "codelight.json",
+  compressed: "codelight.json.gz"
+};
+
+export const STORE_PATTERN = ".vscode/{codelight.json,codelight.json.gz}";
+
+export function storeUri(root: vscode.Uri, mode: StorageMode): vscode.Uri {
+  return vscode.Uri.joinPath(root, ".vscode", STORE_NAMES[mode]);
 }
 
-async function hasStore(root: vscode.Uri): Promise<boolean> {
+export function otherMode(mode: StorageMode): StorageMode {
+  return mode === "compressed" ? "json" : "compressed";
+}
+
+async function exists(target: vscode.Uri): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(storeUri(root));
+    await vscode.workspace.fs.stat(target);
     return true;
   } catch {
     return false;
   }
+}
+
+async function hasStore(root: vscode.Uri): Promise<boolean> {
+  if (await exists(storeUri(root, "json"))) {
+    return true;
+  }
+  return exists(storeUri(root, "compressed"));
 }
 
 export async function resolveRoot(preferred?: vscode.Uri): Promise<vscode.Uri | undefined> {
