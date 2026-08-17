@@ -44,7 +44,7 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(preset?: PaletteColor): Promise<Annotation[]> {
+  async add(preset?: PaletteColor, only?: readonly vscode.Range[]): Promise<Annotation[]> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -62,9 +62,10 @@ export class HighlightCommands {
       return [];
     }
     const ranges: vscode.Range[] = [];
-    for (const selection of editor.selections) {
+    const sources = only ?? editor.selections;
+    for (const selection of sources) {
       const range = selection.isEmpty
-        ? editor.document.lineAt(selection.active.line).range
+        ? editor.document.lineAt(selection.start.line).range
         : new vscode.Range(selection.start, selection.end);
       if (range.isEmpty || ranges.some((existing) => existing.isEqual(range))) {
         continue;

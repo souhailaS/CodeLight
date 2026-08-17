@@ -1,11 +1,19 @@
 import * as vscode from "vscode";
+import { buildAnchor } from "./anchors";
 import { HighlightRenderer } from "./decorations";
 import { HighlightCommands, pickColor } from "./highlights";
+import { timestamp } from "./ids";
 import { PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 
-const SETTLE_MS = 350;
+const SETTLE_MS = 600;
+
+interface Marked {
+  id: string;
+  uri: string;
+  range: vscode.Range;
+}
 
 export class MarkerMode implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
@@ -13,6 +21,7 @@ export class MarkerMode implements vscode.Disposable {
   private color: PaletteColor | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private busy = false;
+  private last: Marked | undefined;
 
   constructor(
     private readonly store: AnnotationStore,
@@ -24,7 +33,10 @@ export class MarkerMode implements vscode.Disposable {
     this.disposables.push(
       this.status,
       vscode.window.onDidChangeTextEditorSelection((event) => this.onSelection(event)),
-      vscode.window.onDidChangeActiveTextEditor(() => this.cancel())
+      vscode.window.onDidChangeActiveTextEditor(() => {
+        this.cancel();
+        this.last = undefined;
+      })
     );
     void vscode.commands.executeCommand("setContext", "codelight.marker", false);
   }
@@ -43,6 +55,7 @@ export class MarkerMode implements vscode.Disposable {
       return;
     }
     this.color = picked;
+    this.last = undefined;
     this.status.text = `$(edit) Marker ${picked.label}`;
     this.status.tooltip = "CodeLight marker is on. Select text to highlight it. Click to turn off.";
     this.status.show();
@@ -52,6 +65,7 @@ export class MarkerMode implements vscode.Disposable {
   off(): void {
     this.cancel();
     this.color = undefined;
+    this.last = undefined;
     this.status.hide();
     void vscode.commands.executeCommand("setContext", "codelight.marker", false);
   }
@@ -67,12 +81,17 @@ export class MarkerMode implements vscode.Disposable {
     if (!this.color || this.busy) {
       return;
     }
+    if (
+      event.kind !== vscode.TextEditorSelectionChangeKind.Mouse &&
+      event.kind !== vscode.TextEditorSelectionChangeKind.Keyboard
+    ) {
+      return;
+    }
     if (event.textEditor !== vscode.window.activeTextEditor) {
       return;
     }
     const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, event.textEditor.document.uri) : undefined;
-    if (!relative) {
+    if (!root || !toRelativePath(root, event.textEditor.document.uri)) {
       return;
     }
     this.cancel();
@@ -90,23 +109,73 @@ export class MarkerMode implements vscode.Disposable {
     if (!color || editor !== vscode.window.activeTextEditor) {
       return;
     }
-    if (editor.selections.every((selection) => selection.isEmpty)) {
+    const ranges = editor.selections
+      .filter((selection) => !selection.isEmpty)
+      .map((selection) => new vscode.Range(selection.start, selection.end));
+    if (ranges.length === 0) {
       return;
     }
     this.busy = true;
     try {
-      const created = await this.highlights.add(color);
-      if (created.length > 0 && editor === vscode.window.activeTextEditor) {
-        const end = editor.selection.end;
-        editor.selection = new vscode.Selection(end, end);
+      if (await this.extend(editor, ranges)) {
+        return;
       }
+      const created = await this.highlights.add(color, ranges);
+      if (created.length === 0) {
+        this.off();
+        void vscode.window.showInformationMessage("CodeLight turned the marker off.");
+        return;
+      }
+      const first = created[0];
+      this.last = {
+        id: first.id,
+        uri: editor.document.uri.toString(),
+        range: ranges[0]
+      };
     } finally {
       this.busy = false;
     }
   }
 
+  private async extend(editor: vscode.TextEditor, ranges: vscode.Range[]): Promise<boolean> {
+    const previous = this.last;
+    if (!previous || ranges.length !== 1) {
+      return false;
+    }
+    if (previous.uri !== editor.document.uri.toString()) {
+      return false;
+    }
+    const grown = ranges[0];
+    if (!grown.contains(previous.range) || grown.isEqual(previous.range)) {
+      return false;
+    }
+    if (!this.store.byId(previous.id)) {
+      this.last = undefined;
+      return false;
+    }
+    const text = editor.document.getText();
+    const saved = await this.store.update(previous.id, (current) => ({
+      ...current,
+      updatedAt: timestamp(),
+      range: {
+        startLine: grown.start.line,
+        startCharacter: grown.start.character,
+        endLine: grown.end.line,
+        endCharacter: grown.end.character
+      },
+      anchor: buildAnchor(text, editor.document.offsetAt(grown.start), editor.document.offsetAt(grown.end))
+    }));
+    if (!saved) {
+      this.last = undefined;
+      return false;
+    }
+    this.last = { id: previous.id, uri: previous.uri, range: grown };
+    return true;
+  }
+
   dispose(): void {
     this.cancel();
+    void vscode.commands.executeCommand("setContext", "codelight.marker", false);
     for (const disposable of this.disposables) {
       disposable.dispose();
     }

@@ -61,7 +61,24 @@ export class ThreadView implements vscode.Disposable {
       prompt: "Comment on this code. Shared with everyone who pulls this repository.",
       placeHolder: "Leave a note for your team"
     };
-    this.controller.commentingRangeProvider = {
+    this.controller.commentingRangeProvider = this.rangeProvider();
+    this.disposables.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("codelight.commentGutter")) {
+          this.controller.commentingRangeProvider = this.rangeProvider();
+        }
+      })
+    );
+    this.disposables.push(
+      store.onDidChange(() => {
+        this.controller.commentingRangeProvider = this.rangeProvider();
+      })
+    );
+    this.wire();
+  }
+
+  private rangeProvider(): vscode.CommentingRangeProvider {
+    return {
       provideCommentingRanges: (document) => {
         const root = this.store.rootUri;
         const relative = root ? toRelativePath(root, document.uri) : undefined;
@@ -89,10 +106,13 @@ export class ThreadView implements vscode.Disposable {
         return [...lines].sort((a, b) => a - b).map((line) => new vscode.Range(line, 0, line, 0));
       }
     };
+  }
+
+  private wire(): void {
     this.disposables.push(
       this.controller,
-      store.onDidChange(() => this.sync()),
-      identity.onDidChange(() => this.sync()),
+      this.store.onDidChange(() => this.sync()),
+      this.identity.onDidChange(() => this.sync()),
       vscode.workspace.onDidOpenTextDocument(() => this.sync()),
       vscode.workspace.onDidCloseTextDocument((document) => {
         for (const thread of [...this.pending.keys()]) {
@@ -103,7 +123,7 @@ export class ThreadView implements vscode.Disposable {
         }
         this.sync();
       }),
-      live.onDidShift((document) => this.reposition(document))
+      this.live.onDidShift((document) => this.reposition(document))
     );
     this.sync();
   }

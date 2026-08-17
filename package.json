@@ -185,7 +185,7 @@
       },
       {
         "command": "codelight.markerOn",
-        "title": "Turn On Marker",
+        "title": "Toggle Marker",
         "category": "CodeLight",
         "icon": {
           "light": "media/mark-light.svg",
@@ -273,6 +273,10 @@
         },
         {
           "command": "codelight.threadDeleteHighlight",
+          "when": "false"
+        },
+        {
+          "command": "codelight.markerOff",
           "when": "false"
         }
       ],
