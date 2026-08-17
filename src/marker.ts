@@ -104,8 +104,12 @@ export class MarkerMode implements vscode.Disposable {
     const spans = this.live.spansFor(editor.document);
     const matches: string[] = [];
     for (const range of ranges) {
+      const me = this.identity.identity?.id;
       const hit = this.store.forFile(relative).find((annotation) => {
-        if (annotation.orphaned === true) {
+        if (annotation.orphaned === true || annotation.comments.length > 0) {
+          return false;
+        }
+        if (me === undefined || annotation.author.id !== me) {
           return false;
         }
         return this.live.rangeFor(editor.document, annotation, spans).isEqual(range);
@@ -130,6 +134,11 @@ export class MarkerMode implements vscode.Disposable {
         return changed;
       });
     }
+    this.last = {
+      ids: matches,
+      uri: editor.document.uri.toString(),
+      color: color.id
+    };
     return true;
   }
 
@@ -146,7 +155,15 @@ export class MarkerMode implements vscode.Disposable {
   }
 
   private onSelection(event: vscode.TextEditorSelectionChangeEvent): void {
-    if (!this.color || this.busy) {
+    if (!this.color) {
+      return;
+    }
+    if (event.selections.every((selection) => selection.isEmpty)) {
+      this.cancel();
+      this.last = undefined;
+      return;
+    }
+    if (this.busy) {
       return;
     }
     if (
@@ -164,10 +181,6 @@ export class MarkerMode implements vscode.Disposable {
       return;
     }
     this.cancel();
-    if (event.selections.every((selection) => selection.isEmpty)) {
-      this.last = undefined;
-      return;
-    }
     this.timer = setTimeout(() => {
       this.timer = undefined;
       void this.mark(event.textEditor);
@@ -231,11 +244,7 @@ export class MarkerMode implements vscode.Disposable {
       if (live.isEmpty) {
         continue;
       }
-      const nested = ranges.some(
-        (range) =>
-          !range.isEqual(live) && (range.contains(live) || live.contains(range))
-      );
-      if (nested) {
+      if (ranges.some((range) => range.contains(live) && !range.isEqual(live))) {
         doomed.push(id);
       }
     }

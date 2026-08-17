@@ -49,7 +49,7 @@ export class ThreadView implements vscode.Disposable {
   private readonly threads = new Map<string, vscode.CommentThread>();
   private readonly owners = new Map<vscode.CommentThread, string>();
   private readonly drafts = new Set<string>();
-  private readonly lost: { body: string; gone: boolean }[] = [];
+  private readonly lost: string[] = [];
   private lostTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number; length: number }>();
   private readonly disposables: vscode.Disposable[] = [];
@@ -258,12 +258,12 @@ export class ThreadView implements vscode.Disposable {
     this.sync();
   }
 
-  private collectLostEdit(entry: ThreadComment, gone: boolean): void {
+  private collectLostEdit(entry: ThreadComment): void {
     const body = typeof entry.body === "string" ? entry.body : entry.body.value;
     if (body.trim() === "" || body === entry.savedBody) {
       return;
     }
-    this.lost.push({ body, gone });
+    this.lost.push(body);
     if (this.lostTimer) {
       return;
     }
@@ -278,16 +278,10 @@ export class ThreadView implements vscode.Disposable {
     if (pending.length === 0) {
       return;
     }
-    const rescued = await rescue(pending.map((entry) => entry.body).join("\n\n"));
-    const gone = pending.some((entry) => entry.gone);
+    const rescued = await rescue(pending.join("\n\n"));
     const many = rescued && pending.length > 1 ? ` All ${pending.length} were kept together.` : "";
     void vscode.window.showWarningMessage(
-      withRescue(
-        gone
-          ? "A comment you were editing was removed from the shared file."
-          : "You were editing a comment when the notes were hidden.",
-        rescued
-      ) + many
+      withRescue("A comment you were editing was removed from the shared file.", rescued) + many
     );
   }
 
@@ -790,7 +784,7 @@ export class ThreadView implements vscode.Disposable {
     }
     for (const [id, entry] of editing) {
       if (!annotation.comments.some((comment) => comment.id === id)) {
-        this.collectLostEdit(entry, true);
+        this.collectLostEdit(entry);
       }
     }
     thread.comments = annotation.comments.map((comment) => {
@@ -814,7 +808,7 @@ export class ThreadView implements vscode.Disposable {
   private sync(): void {
     const root = this.store.rootUri;
     const wanted = new Map<string, { annotation: Annotation; document: vscode.TextDocument }>();
-    if (root) {
+    if (root && this.visibility.visible) {
       for (const document of vscode.workspace.textDocuments) {
         const relative = toRelativePath(root, document.uri);
         if (!relative) {
@@ -833,11 +827,10 @@ export class ThreadView implements vscode.Disposable {
     const hidden = !this.visibility.visible;
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
-        const gone = this.store.byId(id) === undefined;
-        if (gone || hidden) {
+        if (!hidden && this.store.byId(id) === undefined) {
           for (const entry of thread.comments) {
             if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
-              this.collectLostEdit(entry, gone);
+              this.collectLostEdit(entry);
             }
           }
         }
@@ -862,9 +855,6 @@ export class ThreadView implements vscode.Disposable {
       }
       existing.range = this.live.rangeFor(entry.document, entry.annotation);
       this.fill(existing, entry.annotation);
-      if (!this.visibility.visible) {
-        existing.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-      }
     }
   }
 
