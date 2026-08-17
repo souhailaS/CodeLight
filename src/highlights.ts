@@ -89,9 +89,11 @@ export class HighlightCommands {
       return [];
     }
     const text = editor.document.getText();
-    const anchors = ranges.map((range) =>
-      buildAnchor(text, editor.document.offsetAt(range.start), editor.document.offsetAt(range.end))
-    );
+    const offsets = ranges.map((range) => ({
+      start: editor.document.offsetAt(range.start),
+      end: editor.document.offsetAt(range.end)
+    }));
+    const anchors = offsets.map((offset) => buildAnchor(text, offset.start, offset.end));
     const version = editor.document.version;
     const author = await this.identity.require();
     if (!author) {
@@ -115,7 +117,7 @@ export class HighlightCommands {
     if (editor.document.version !== version) {
       const current = editor.document.getText();
       const relocated: vscode.Range[] = [];
-      for (const anchor of anchors) {
+      for (const [index, anchor] of anchors.entries()) {
         const found = findAnchor(current, anchor);
         if (!found) {
           void vscode.window.showWarningMessage(
@@ -123,11 +125,10 @@ export class HighlightCommands {
           );
           return [];
         }
+        const wanted = offsets[index].end - offsets[index].start;
+        const end = Math.min(current.length, found.start + Math.max(found.end - found.start, wanted));
         relocated.push(
-          new vscode.Range(
-            editor.document.positionAt(found.start),
-            editor.document.positionAt(found.end)
-          )
+          new vscode.Range(editor.document.positionAt(found.start), editor.document.positionAt(end))
         );
       }
       placed = relocated;
@@ -185,7 +186,9 @@ export class HighlightCommands {
 
   isCollapsed(annotation: Annotation): boolean {
     const editor = vscode.window.activeTextEditor;
-    if (!editor) {
+    const root = this.store.rootUri;
+    const relative = editor && root ? toRelativePath(root, editor.document.uri) : undefined;
+    if (!editor || relative !== annotation.file) {
       return annotation.orphaned === true;
     }
     return this.live.rangeFor(editor.document, annotation).isEmpty;
@@ -228,9 +231,13 @@ export class HighlightCommands {
     const picked = await vscode.window.showQuickPick(
       candidates.map((annotation) => {
         const orphan = isOrphan(annotation);
+        const thread =
+          annotation.comments.length === 0
+            ? ""
+            : `, ${annotation.comments.length} comment${annotation.comments.length === 1 ? "" : "s"}`;
         return {
           label: orphan ? `${snippet(annotation)} (text deleted)` : snippet(annotation),
-          description: `${annotation.color} by ${annotation.author.login}`,
+          description: `${annotation.color} by ${annotation.author.login}${thread}`,
           annotation
         };
       }),
@@ -243,6 +250,17 @@ export class HighlightCommands {
     const annotation = await this.pickAtCursor("Remove highlight");
     if (!annotation) {
       return;
+    }
+    if (annotation.comments.length > 0) {
+      const count = annotation.comments.length;
+      const confirmed = await vscode.window.showWarningMessage(
+        `Remove this highlight and its ${count} comment${count === 1 ? "" : "s"}?`,
+        { modal: true },
+        "Remove"
+      );
+      if (confirmed !== "Remove") {
+        return;
+      }
     }
     if (!(await this.store.remove(annotation.id))) {
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");

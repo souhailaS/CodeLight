@@ -79,9 +79,13 @@ export class HighlightRenderer implements vscode.Disposable {
       options.push({ range, hoverMessage: this.hover(annotation) });
       const label = range.isEmpty ? undefined : inlineLabel(annotation, this.inline);
       if (label !== undefined) {
-        const line = labels.get(range.end.line) ?? [];
+        const anchorLine =
+          range.end.character === 0 && range.end.line > range.start.line
+            ? range.end.line - 1
+            : range.end.line;
+        const line = labels.get(anchorLine) ?? [];
         line.push(label.trim());
-        labels.set(range.end.line, line);
+        labels.set(anchorLine, line);
       }
     }
     for (const [key, options] of grouped) {
