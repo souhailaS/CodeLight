@@ -2,20 +2,41 @@
   "name": "codelight",
   "displayName": "CodeLight",
   "description": "Shared highlights and inline comments that live in .vscode",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "MIT",
   "icon": "media/icon.png",
   "publisher": "souhailaS",
+  "homepage": "https://souhailas.github.io/CodeLight/",
   "repository": {
     "type": "git",
     "url": "https://github.com/souhailaS/CodeLight.git"
   },
+  "bugs": {
+    "url": "https://github.com/souhailaS/CodeLight/issues"
+  },
+  "qna": "https://github.com/souhailaS/CodeLight/issues",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization",
+    "Education"
   ],
+  "keywords": [
+    "annotations",
+    "highlight",
+    "comments",
+    "notes",
+    "code review",
+    "collaboration",
+    "markers",
+    "reading"
+  ],
+  "galleryBanner": {
+    "color": "#161a24",
+    "theme": "dark"
+  },
   "main": "./dist/extension.js",
   "activationEvents": [
     "workspaceContains:.vscode/codelight.json"
