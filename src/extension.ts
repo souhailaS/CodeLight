@@ -4,9 +4,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("codelight.showStatus", () => {
       const active = vscode.window.activeTextEditor;
-      const folder = active
+      const activeFolder = active
         ? vscode.workspace.getWorkspaceFolder(active.document.uri)
-        : vscode.workspace.workspaceFolders?.[0];
+        : undefined;
+      const folder = activeFolder ?? vscode.workspace.workspaceFolders?.[0];
       if (!folder) {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
