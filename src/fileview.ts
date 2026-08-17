@@ -27,6 +27,7 @@ interface FileCards {
 interface CardView {
   id: string;
   html: string;
+  line: string;
 }
 
 interface Content {
@@ -104,8 +105,15 @@ function script(): string {
     "    alive.add(card.id);",
     "    let entry = nodes.get(card.id);",
     "    if (!entry || entry.html !== card.html) {",
-    "      entry = { node: build(card.html), html: card.html };",
+    "      entry = { node: build(card.html), html: card.html, line: null };",
     "      nodes.set(card.id, entry);",
+    "    }",
+    "    if (entry.line !== card.line) {",
+    "      entry.line = card.line;",
+    "      const label = entry.node.querySelector('.line');",
+    "      if (label) {",
+    "        label.textContent = card.line;",
+    "      }",
     "    }",
     "    if (list.children[index] !== entry.node) {",
     "      list.insertBefore(entry.node, list.children[index] || null);",
@@ -130,6 +138,10 @@ function script(): string {
     "  return true;",
     "};",
     "list.addEventListener('click', (event) => {",
+    "  const selection = window.getSelection();",
+    "  if (selection && !selection.isCollapsed) {",
+    "    return;",
+    "  }",
     "  reveal(event.target);",
     "});",
     "list.addEventListener('keydown', (event) => {",
@@ -201,17 +213,20 @@ function renderCard(card: Card): string {
       ? `<span class="dot"></span>`
       : `<span class="dot" style="background: ${escapeHtml(card.hex)}"></span>`;
   const classes = card.orphaned ? "card orphan" : "card";
-  const note = card.orphaned ? "text deleted" : `Line ${card.line}`;
   return [
     `<div class="${classes}" role="button" tabindex="0" data-id="${escapeHtml(card.id)}">`,
     `<div class="head">`,
     dot,
     `<span class="snippet">${escapeHtml(card.label)}</span>`,
-    `<span class="line">${note}</span>`,
+    `<span class="line"></span>`,
     `</div>`,
     card.comments.map(renderComment).join(""),
     `</div>`
   ].join("");
+}
+
+function lineLabel(card: Card): string {
+  return card.orphaned ? "text deleted" : `Line ${card.line}`;
 }
 
 export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -333,19 +348,24 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     void view.webview.postMessage(payload);
   }
 
+  private mappable(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
+    const root = this.store.rootUri;
+    if (!editor || !root || editor.document.isClosed) {
+      return false;
+    }
+    return toRelativePath(root, editor.document.uri) !== undefined;
+  }
+
   private editor(): vscode.TextEditor | undefined {
     const active = vscode.window.activeTextEditor;
-    if (active) {
+    if (this.mappable(active)) {
       this.tracked = active;
       return active;
     }
-    const previous = this.tracked?.document.uri.toString();
-    const still = previous
-      ? vscode.window.visibleTextEditors.find(
-          (candidate) => candidate.document.uri.toString() === previous
-        )
-      : undefined;
-    this.tracked = still ?? vscode.window.visibleTextEditors[0];
+    if (this.mappable(this.tracked)) {
+      return this.tracked;
+    }
+    this.tracked = vscode.window.visibleTextEditors.find((candidate) => this.mappable(candidate));
     return this.tracked;
   }
 
@@ -417,7 +437,11 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     return {
       head,
       note: "",
-      cards: found.cards.map((card) => ({ id: card.id, html: renderCard(card) }))
+      cards: found.cards.map((card) => ({
+        id: card.id,
+        html: renderCard(card),
+        line: lineLabel(card)
+      }))
     };
   }
 
