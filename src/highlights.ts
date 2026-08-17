@@ -1,26 +1,15 @@
 import * as vscode from "vscode";
+import { buildAnchor } from "./anchors";
 import { HighlightRenderer } from "./decorations";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
-import { Anchor, Annotation } from "./model";
+import { Annotation } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 
-const ANCHOR_CONTEXT = 60;
-const MAX_ANCHOR_TEXT = 400;
 const SNIPPET_LENGTH = 50;
-
-function buildAnchor(document: vscode.TextDocument, range: vscode.Range, whole: string): Anchor {
-  const offset = document.offsetAt(range.start);
-  const endOffset = document.offsetAt(range.end);
-  return {
-    text: whole.slice(offset, endOffset).slice(0, MAX_ANCHOR_TEXT),
-    before: whole.slice(Math.max(0, offset - ANCHOR_CONTEXT), offset),
-    after: whole.slice(endOffset, endOffset + ANCHOR_CONTEXT)
-  };
-}
 
 function snippet(annotation: Annotation): string {
   const text = annotation.anchor.text.replace(/\s+/g, " ").trim();
@@ -100,7 +89,9 @@ export class HighlightCommands {
       return [];
     }
     const text = editor.document.getText();
-    const anchors = ranges.map((range) => buildAnchor(editor.document, range, text));
+    const anchors = ranges.map((range) =>
+      buildAnchor(text, editor.document.offsetAt(range.start), editor.document.offsetAt(range.end))
+    );
     const version = editor.document.version;
     const author = await this.identity.require();
     if (!author) {
@@ -231,13 +222,16 @@ export class HighlightCommands {
       return;
     }
     const ids = new Set(picked.map((item) => item.annotation.id));
-    await this.store.transaction((annotations) => {
+    const saved = await this.store.transaction((annotations) => {
       let changed = false;
       for (const id of ids) {
         changed = annotations.delete(id) || changed;
       }
       return changed;
     });
+    if (!saved) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+    }
   }
 
   async recolor(): Promise<void> {
