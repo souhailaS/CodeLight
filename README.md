@@ -8,7 +8,9 @@ Shared highlights and comments for VS Code, kept beside your code instead of ins
 
 VS Code stopped being only a code editor a long time ago. People draft documents in it, read specifications in it, and work through unfamiliar repositories in it, and almost all of that time is spent reading rather than typing.
 
-That shift matters more now that code arrives generated, with its comments already written. Those comments explain what the code does. They say nothing about what you noticed while reading it, what looked wrong, or what you wanted a colleague to confirm.
+That balance tipped further once code started arriving generated, with its comments already written. The typing is increasingly done for us, so what is left is reading, deciding whether what came back is right, and saying what should happen next. We now spend relatively more time reading code than writing it.
+
+Generated comments explain what the code does. They say nothing about what you noticed while reading it, what looked wrong, or what you wanted a colleague to confirm.
 
 Reading notes have nowhere good to live today. Put them in the source and they become part of the product, they show up in everyone's diff, and someone has to remember to take them out. Put them in a pull request and they are trapped in a branch that may sit unmerged for weeks, invisible to anyone not reviewing it, and gone the moment the branch is.
 

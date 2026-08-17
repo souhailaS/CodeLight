@@ -42,7 +42,7 @@
   .logo { width: 84px; height: 84px; border-radius: 19px; display: block; }
   h1 { font-size: 40px; letter-spacing: -0.02em; margin: 24px 0 8px; }
   .tagline { font-size: 20px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
-  .mark { background: linear-gradient(transparent 62%, var(--mark) 62%); padding: 0 2px; }
+  .mark { background: var(--mark); color: #1b1f2a; border-radius: 3px; padding: 1px 4px; }
   .buttons { display: flex; gap: 12px; flex-wrap: wrap; }
   .btn {
     display: inline-block; padding: 10px 18px; border-radius: 8px; text-decoration: none;
@@ -91,7 +91,8 @@
 <section class="lede">
   <h2>Why</h2>
   <p>VS Code stopped being only a code editor a long time ago. People draft documents in it, read specifications in it, and work through unfamiliar repositories in it, and almost all of that time is spent reading rather than typing.</p>
-  <p>That shift matters more now that code arrives generated, with its comments already written. Those comments explain what the code does. They say nothing about what you noticed while reading it, what looked wrong, or what you wanted a colleague to confirm.</p>
+  <p>That balance tipped further once code started arriving generated, with its comments already written. The typing is increasingly done for us, so what is left is reading, deciding whether what came back is right, and saying what should happen next. We now spend relatively more time reading code than writing it.</p>
+  <p>Generated comments explain what the code does. They say nothing about what you noticed while reading it, what looked wrong, or what you wanted a colleague to confirm.</p>
   <p>Reading notes have nowhere good to live today. Put them in the source and they become part of the product, they show up in everyone's diff, and someone has to remember to take them out. Put them in a pull request and they are trapped in a branch that may sit unmerged for weeks, invisible to anyone not reviewing it, and gone the moment the branch is.</p>
   <p>CodeLight makes commenting a layer of its own. Highlight anything, attach a note, and share it with your team through the repository you already share, without touching a single line of code.</p>
 </section>
