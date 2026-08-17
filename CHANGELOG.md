@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+Fix the logo not loading on the Marketplace page.
+Relicense under PolyForm Noncommercial 1.0.0.
+
 ## 0.1.0
 
 First release.

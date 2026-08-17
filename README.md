@@ -1,4 +1,4 @@
-<img src="media/icon.png" width="88" align="right" alt="CodeLight" />
+<img src="https://raw.githubusercontent.com/souhailaS/CodeLight/main/media/icon.png" width="88" align="right" alt="CodeLight" />
 
 # CodeLight
 
@@ -55,4 +55,4 @@ code --install-extension codelight-0.0.1.vsix
 
 ## License
 
-MIT
+PolyForm Noncommercial 1.0.0. Free for noncommercial use, including personal projects, research and teaching. Commercial use requires a separate licence.
