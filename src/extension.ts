@@ -2,15 +2,13 @@ import * as vscode from "vscode";
 import { IdentityProvider } from "./identity";
 import { AnnotationStore } from "./store";
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
   const store = new AnnotationStore();
-  context.subscriptions.push(identity, store);
-
-  await identity.refresh();
-  await store.initialize();
 
   context.subscriptions.push(
+    identity,
+    store,
     vscode.commands.registerCommand("codelight.signIn", async () => {
       const account = await identity.require();
       if (account) {
@@ -29,6 +27,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
     })
   );
+
+  void identity.refresh();
+  void store.initialize();
 }
 
 export function deactivate(): void {}

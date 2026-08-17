@@ -4,6 +4,17 @@ import { storeUri, workspaceRoot } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
 
+function isMissingFile(error: unknown): boolean {
+  if (error instanceof vscode.FileSystemError) {
+    return error.code === "FileNotFound";
+  }
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class AnnotationStore implements vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
   private readonly disposables: vscode.Disposable[] = [];
@@ -15,6 +26,7 @@ export class AnnotationStore implements vscode.Disposable {
   private lastSerialized: string | undefined;
   private reportedFailure: string | undefined;
   private reportedDropped = 0;
+  private generation = 0;
 
   readonly onDidChange = this.emitter.event;
 
@@ -54,14 +66,18 @@ export class AnnotationStore implements vscode.Disposable {
     return this.all.filter((annotation) => annotation.file === relativePath);
   }
 
-  async add(annotation: Annotation): Promise<void> {
+  async add(annotation: Annotation): Promise<boolean> {
+    if (!this.isReady) {
+      return false;
+    }
     this.annotations.set(annotation.id, annotation);
     await this.persist();
+    return true;
   }
 
   async update(id: string, mutate: (annotation: Annotation) => Annotation): Promise<boolean> {
     const existing = this.annotations.get(id);
-    if (!existing) {
+    if (!this.isReady || !existing) {
       return false;
     }
     this.annotations.set(id, mutate(existing));
@@ -70,7 +86,7 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async remove(id: string): Promise<boolean> {
-    if (!this.annotations.delete(id)) {
+    if (!this.isReady || !this.annotations.delete(id)) {
       return false;
     }
     await this.persist();
@@ -81,6 +97,11 @@ export class AnnotationStore implements vscode.Disposable {
     const root = workspaceRoot();
     if (this.root?.toString() === root?.toString()) {
       return;
+    }
+    this.generation += 1;
+    if (this.reloadTimer) {
+      clearTimeout(this.reloadTimer);
+      this.reloadTimer = undefined;
     }
     this.watcher?.dispose();
     this.watcher = undefined;
@@ -117,11 +138,22 @@ export class AnnotationStore implements vscode.Disposable {
     if (!target) {
       return;
     }
+    const generation = this.generation;
     let raw: string;
     try {
       const bytes = await vscode.workspace.fs.readFile(target);
+      if (generation !== this.generation) {
+        return;
+      }
       raw = Buffer.from(bytes).toString("utf8");
-    } catch {
+    } catch (error) {
+      if (generation !== this.generation) {
+        return;
+      }
+      if (!isMissingFile(error)) {
+        this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
+        return;
+      }
       if (this.annotations.size === 0 && this.lastSerialized === undefined) {
         return;
       }
@@ -141,12 +173,16 @@ export class AnnotationStore implements vscode.Disposable {
       this.warnAboutDropped(parsed.dropped, target);
       this.emitter.fire();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (this.reportedFailure !== message) {
-        this.reportedFailure = message;
-        void vscode.window.showErrorMessage(`CodeLight could not read ${target.fsPath}. ${message}`);
-      }
+      this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
     }
+  }
+
+  private reportFailure(message: string): void {
+    if (this.reportedFailure === message) {
+      return;
+    }
+    this.reportedFailure = message;
+    void vscode.window.showErrorMessage(message);
   }
 
   private warnAboutDropped(dropped: number, target: vscode.Uri): void {
@@ -169,15 +205,20 @@ export class AnnotationStore implements vscode.Disposable {
       return;
     }
     const content = serializeStore(this.all);
-    this.lastSerialized = content;
+    const generation = this.generation;
     this.emitter.fire();
     this.pendingWrite = this.pendingWrite.then(async () => {
       try {
         await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
         await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
+        if (generation === this.generation) {
+          this.lastSerialized = content;
+        }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        void vscode.window.showErrorMessage(`CodeLight could not save annotations. ${message}`);
+        if (generation === this.generation) {
+          this.lastSerialized = undefined;
+        }
+        void vscode.window.showErrorMessage(`CodeLight could not save annotations. ${describe(error)}`);
       }
     });
     await this.pendingWrite;

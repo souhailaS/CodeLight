@@ -41,7 +41,12 @@ export class IdentityProvider implements vscode.Disposable {
   }
 
   async refresh(): Promise<Identity | undefined> {
-    const session = await vscode.authentication.getSession(PROVIDER, SCOPES, { silent: true });
+    let session: vscode.AuthenticationSession | undefined;
+    try {
+      session = await vscode.authentication.getSession(PROVIDER, SCOPES, { silent: true });
+    } catch {
+      return this.current;
+    }
     const next = session ? toIdentity(session) : undefined;
     const changed =
       next?.id !== this.current?.id || next?.login !== this.current?.login;

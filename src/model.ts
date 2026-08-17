@@ -79,7 +79,9 @@ function parseRange(value: unknown): AnnotationRange {
   const startLine = readLineNumber(value.startLine);
   const startCharacter = readLineNumber(value.startCharacter);
   const endLine = Math.max(startLine, readLineNumber(value.endLine));
-  const endCharacter = readLineNumber(value.endCharacter);
+  const rawEndCharacter = readLineNumber(value.endCharacter);
+  const endCharacter =
+    endLine === startLine ? Math.max(startCharacter, rawEndCharacter) : rawEndCharacter;
   return { startLine, startCharacter, endLine, endCharacter };
 }
 
@@ -113,6 +115,17 @@ function parseComment(value: unknown): Comment | undefined {
   };
 }
 
+export function isSafeRelativePath(candidate: string): boolean {
+  if (candidate === "" || candidate.startsWith("/") || candidate.includes("\\")) {
+    return false;
+  }
+  if (/^[a-zA-Z]:/.test(candidate)) {
+    return false;
+  }
+  const segments = candidate.split("/");
+  return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
 function parseAnnotation(value: unknown): Annotation | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -120,7 +133,7 @@ function parseAnnotation(value: unknown): Annotation | undefined {
   const id = readString(value.id).trim();
   const file = readString(value.file).trim();
   const author = parseAuthor(value.author);
-  if (id === "" || file === "" || !author) {
+  if (id === "" || !isSafeRelativePath(file) || !author) {
     return undefined;
   }
   const createdAt = readString(value.createdAt);
@@ -154,6 +167,11 @@ export function parseStore(raw: string): ParsedStore {
   }
   if (!isRecord(parsed)) {
     throw new Error("codelight.json must contain an object");
+  }
+  if (typeof parsed.version === "number" && parsed.version > STORE_VERSION) {
+    throw new Error(
+      `codelight.json uses format version ${parsed.version}, this build understands ${STORE_VERSION}. Update the extension.`
+    );
   }
   const rawAnnotations = Array.isArray(parsed.annotations) ? parsed.annotations : [];
   const seen = new Set<string>();
