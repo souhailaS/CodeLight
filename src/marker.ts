@@ -80,6 +80,11 @@ export class MarkerMode implements vscode.Disposable {
     void vscode.commands.executeCommand("setContext", "codelight.marker", false);
   }
 
+  private relativePath(editor: vscode.TextEditor): string | undefined {
+    const root = this.store.rootUri;
+    return root ? toRelativePath(root, editor.document.uri) : undefined;
+  }
+
   private cancel(): void {
     if (this.timer) {
       clearTimeout(this.timer);
@@ -127,6 +132,12 @@ export class MarkerMode implements vscode.Disposable {
       return;
     }
     const previous = this.last;
+    const relative = this.relativePath(editor);
+    if (relative && ranges.every((range) => this.highlights.alreadyMarked(editor, relative, range))) {
+      this.last = undefined;
+      this.catchUp(editor, ranges);
+      return;
+    }
     this.busy = true;
     try {
       const created = await this.highlights.add(color, ranges, editor);
@@ -138,20 +149,16 @@ export class MarkerMode implements vscode.Disposable {
             "CodeLight turned the marker off after three highlights could not be saved."
           );
         }
-        return;
+      } else {
+        this.misses = 0;
       }
-      this.misses = 0;
-      if (!this.color) {
-        return;
+      if (created.length > 0 && this.color) {
+        await this.dropPrevious(previous, editor, ranges);
+        this.last =
+          this.color && ranges.length === 1
+            ? { id: created[0].id, uri: editor.document.uri.toString() }
+            : undefined;
       }
-      await this.dropPrevious(previous, editor, ranges);
-      if (!this.color) {
-        return;
-      }
-      this.last =
-        ranges.length === 1
-          ? { id: created[0].id, uri: editor.document.uri.toString() }
-          : undefined;
     } finally {
       this.busy = false;
     }

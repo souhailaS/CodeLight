@@ -75,17 +75,29 @@ export class ThreadView implements vscode.Disposable {
     );
     this.disposables.push(
       store.onDidChange(() => {
-        if (readGutterMode(this.store.rootUri) === "highlights") {
+        const scoped = vscode.window.visibleTextEditors.some(
+          (editor) => readGutterMode(editor.document.uri) === "highlights"
+        );
+        if (scoped || readGutterMode(this.store.rootUri) === "highlights") {
           this.controller.commentingRangeProvider = this.rangeProvider();
         }
       })
     );
     this.disposables.push(
       visibility.onDidChange((shown) => {
+        const open = this.threads.size;
         this.controller.commentingRangeProvider = this.rangeProvider();
         this.sync();
-        if (!shown && this.pending.size > 0) {
+        if (shown) {
+          return;
+        }
+        if (this.pending.size > 0) {
           void vscode.window.showInformationMessage("The note you are writing stays open.");
+        }
+        if (open > 0) {
+          void vscode.window.showInformationMessage(
+            "Comment threads were closed. Anything typed into a reply box was not kept."
+          );
         }
       })
     );
@@ -180,9 +192,8 @@ export class ThreadView implements vscode.Disposable {
       createdAt: now,
       updatedAt: now
     };
-    const adopted = owned;
-    if (adopted !== undefined) {
-      const annotation = this.store.byId(adopted);
+    if (owned !== undefined) {
+      const annotation = this.store.byId(owned);
       const document = vscode.workspace.textDocuments.find(
         (entry) => entry.uri.toString() === reply.thread.uri.toString()
       );
@@ -199,11 +210,11 @@ export class ThreadView implements vscode.Disposable {
       }
     }
     const annotationId =
-      adopted ?? (await this.createAnnotation(reply.thread, comment, comment.author));
+      owned ?? (await this.createAnnotation(reply.thread, comment, comment.author));
     if (annotationId === undefined) {
       return;
     }
-    if (owned === undefined && adopted === undefined) {
+    if (owned === undefined) {
       this.drafts.delete(annotationId);
       const created = this.threads.get(annotationId);
       if (created) {
@@ -275,12 +286,12 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const rescued = await rescue(pending.map((entry) => entry.body).join("\n\n"));
-    const gone = pending.every((entry) => entry.gone);
-    const many = pending.length > 1 ? ` ${pending.length} drafts were kept together.` : "";
+    const gone = pending.some((entry) => entry.gone);
+    const many = rescued && pending.length > 1 ? ` All ${pending.length} were kept together.` : "";
     void vscode.window.showWarningMessage(
       withRescue(
         gone
-          ? "The comment you were editing was removed from the shared file."
+          ? "A comment you were editing was removed from the shared file."
           : "You were editing a comment when the notes were hidden.",
         rescued
       ) + many

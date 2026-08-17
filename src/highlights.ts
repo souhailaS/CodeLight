@@ -9,6 +9,7 @@ import { PaletteColor } from "./palette";
 import { Swatches } from "./swatches";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
+import { Visibility } from "./visibility";
 import { snippet } from "./thread";
 
 let swatches: Swatches | undefined;
@@ -43,7 +44,8 @@ export class HighlightCommands {
     private readonly store: AnnotationStore,
     private readonly identity: IdentityProvider,
     private readonly renderer: HighlightRenderer,
-    private readonly live: LiveRanges
+    private readonly live: LiveRanges,
+    private readonly visibility: Visibility
   ) {}
 
   async add(
@@ -51,6 +53,7 @@ export class HighlightCommands {
     only?: readonly vscode.Range[],
     target?: vscode.TextEditor
   ): Promise<Annotation[]> {
+    this.visibility.show();
     const editor = target ?? vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -68,6 +71,7 @@ export class HighlightCommands {
       return [];
     }
     const ranges: vscode.Range[] = [];
+    let skipped = 0;
     const sources = only ?? editor.selections;
     for (const selection of sources) {
       const range = selection.isEmpty
@@ -77,6 +81,7 @@ export class HighlightCommands {
         continue;
       }
       if (this.alreadyMarked(editor, relative, range)) {
+        skipped += 1;
         continue;
       }
       ranges.push(range);
@@ -84,9 +89,9 @@ export class HighlightCommands {
     if (ranges.length === 0) {
       if (only === undefined) {
         void vscode.window.showWarningMessage(
-          editor.selections.every((selection) => selection.isEmpty)
-            ? "This line is empty. Select some text to highlight."
-            : "That text is already highlighted."
+          skipped > 0
+            ? "That text is already highlighted."
+            : "This line is empty. Select some text to highlight."
         );
       }
       return [];
@@ -181,11 +186,7 @@ export class HighlightCommands {
     });
   }
 
-  private alreadyMarked(
-    editor: vscode.TextEditor,
-    relative: string,
-    range: vscode.Range
-  ): boolean {
+  alreadyMarked(editor: vscode.TextEditor, relative: string, range: vscode.Range): boolean {
     const spans = this.live.spansFor(editor.document);
     return this.store.forFile(relative).some((annotation) => {
       if (annotation.orphaned === true) {
@@ -394,6 +395,7 @@ export class HighlightCommands {
   }
 
   async recolor(): Promise<void> {
+    this.visibility.show();
     const annotation = await this.pickAtCursor("Change highlight color");
     if (!annotation) {
       return;

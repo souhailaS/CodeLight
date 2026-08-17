@@ -553,8 +553,7 @@
         "codelight.gutterMarks": {
           "type": "boolean",
           "default": true,
-          "description": "Show a coloured mark in the gutter beside every highlight.",
-          "scope": "resource"
+          "description": "Show a coloured mark in the gutter beside every highlight."
         }
       }
     },
