@@ -259,6 +259,7 @@ export class PanelCommands {
   private async commitRemoval(expected: Map<string, number>, retry: string): Promise<void> {
     let drifted = false;
     let missing = false;
+    let removed = false;
     const saved = await this.store.transaction((annotations) => {
       let changed = false;
       for (const [id, count] of expected) {
@@ -273,6 +274,7 @@ export class PanelCommands {
         }
         annotations.delete(id);
         changed = true;
+        removed = true;
       }
       return changed;
     });
@@ -285,6 +287,8 @@ export class PanelCommands {
     }
     if (missing) {
       await this.store.refresh();
+    }
+    if (!saved && !removed && missing) {
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
       return;
     }
