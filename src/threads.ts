@@ -110,6 +110,9 @@ export class ThreadView implements vscode.Disposable {
             continue;
           }
           const range = this.live.rangeFor(document, annotation, spans);
+          if (range.isEmpty) {
+            continue;
+          }
           for (let line = range.start.line; line <= range.end.line; line += 1) {
             lines.add(line);
           }
@@ -197,10 +200,6 @@ export class ThreadView implements vscode.Disposable {
     if (annotationId === undefined) {
       return;
     }
-    if (adopted !== undefined && owned === undefined) {
-      this.pending.delete(reply.thread);
-      reply.thread.dispose();
-    }
     if (owned === undefined && adopted === undefined) {
       this.drafts.delete(annotationId);
       const created = this.threads.get(annotationId);
@@ -248,7 +247,12 @@ export class ThreadView implements vscode.Disposable {
       }
     }
     this.drafts.delete(annotationId);
-    reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    if (adopted !== undefined && owned === undefined) {
+      this.pending.delete(reply.thread);
+      reply.thread.dispose();
+    } else {
+      reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    }
     this.sync();
   }
 
@@ -439,6 +443,7 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async openDraft(editor: vscode.TextEditor): Promise<void> {
+    this.visibility.show();
     const root = this.store.rootUri;
     const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
     if (!relative) {
@@ -499,6 +504,7 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async open(annotationId: string): Promise<void> {
+    this.visibility.show();
     const annotation = this.store.byId(annotationId);
     const root = this.store.rootUri;
     if (!annotation) {
@@ -667,17 +673,21 @@ export class ThreadView implements vscode.Disposable {
       return undefined;
     }
     const spans = this.live.spansFor(document);
-    const covering: string[] = [];
+    let best: { id: string; width: number } | undefined;
     for (const annotation of this.store.forFile(relative)) {
       if (annotation.orphaned === true) {
         continue;
       }
       const live = this.live.rangeFor(document, annotation, spans);
-      if (!live.isEmpty && live.start.line <= range.start.line && range.start.line <= live.end.line) {
-        covering.push(annotation.id);
+      if (live.isEmpty || live.start.line > range.start.line || range.start.line > live.end.line) {
+        continue;
+      }
+      const width = document.offsetAt(live.end) - document.offsetAt(live.start);
+      if (!best || width < best.width) {
+        best = { id: annotation.id, width };
       }
     }
-    return covering.length === 1 ? covering[0] : undefined;
+    return best?.id;
   }
 
   private async createAnnotation(
@@ -836,9 +846,11 @@ export class ThreadView implements vscode.Disposable {
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
         const gone = this.store.byId(id) === undefined;
-        for (const entry of thread.comments) {
-          if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
-            void this.rescueLostEdit(entry, gone);
+        if (gone || hidden) {
+          for (const entry of thread.comments) {
+            if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
+              void this.rescueLostEdit(entry, gone);
+            }
           }
         }
         this.owners.delete(thread);

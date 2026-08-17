@@ -78,7 +78,11 @@ export function readInlineMode(resource?: vscode.Uri): InlineMode {
 
 export function readGutterMode(resource?: vscode.Uri): GutterMode {
   const configured = configuration(resource).get<unknown>("commentGutter");
-  return configured === "always" || configured === "off" ? configured : "highlights";
+  return configured === "highlights" || configured === "off" ? configured : "always";
+}
+
+export function readGutterMarks(resource?: vscode.Uri): boolean {
+  return configuration(resource).get<unknown>("gutterMarks") !== false;
 }
 
 export function resolveColor(palette: readonly PaletteColor[], id: string): PaletteColor {

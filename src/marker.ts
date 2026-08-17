@@ -5,6 +5,7 @@ import { LiveRanges } from "./live";
 import { PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
+import { Visibility } from "./visibility";
 
 const SETTLE_MS = 600;
 
@@ -27,7 +28,8 @@ export class MarkerMode implements vscode.Disposable {
     private readonly store: AnnotationStore,
     private readonly renderer: HighlightRenderer,
     private readonly highlights: HighlightCommands,
-    private readonly live: LiveRanges
+    private readonly live: LiveRanges,
+    private readonly visibility: Visibility
   ) {
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.status.command = "codelight.markerOff";
@@ -55,6 +57,7 @@ export class MarkerMode implements vscode.Disposable {
     if (!picked) {
       return;
     }
+    this.visibility.show();
     this.color = picked;
     this.last = undefined;
     this.misses = 0;
@@ -133,7 +136,13 @@ export class MarkerMode implements vscode.Disposable {
         return;
       }
       this.misses = 0;
+      if (!this.color) {
+        return;
+      }
       await this.dropPrevious(previous, editor, ranges);
+      if (!this.color) {
+        return;
+      }
       this.last = {
         id: created[0].id,
         uri: editor.document.uri.toString(),
@@ -157,7 +166,7 @@ export class MarkerMode implements vscode.Disposable {
       return;
     }
     const annotation = this.store.byId(previous.id);
-    if (!annotation) {
+    if (!annotation || annotation.comments.length > 0) {
       return;
     }
     const live = this.live.rangeFor(editor.document, annotation);

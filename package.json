@@ -536,18 +536,24 @@
         },
         "codelight.commentGutter": {
           "type": "string",
-          "default": "highlights",
+          "default": "always",
           "enum": [
-            "highlights",
             "always",
+            "highlights",
             "off"
           ],
           "enumDescriptions": [
-            "Offer the comment button only on lines that already have a highlight",
             "Offer it on every line",
+            "Offer the comment button only on lines that already have a highlight",
             "Never offer it"
           ],
           "description": "Where the comment button appears in the gutter.",
+          "scope": "resource"
+        },
+        "codelight.gutterMarks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a coloured mark in the gutter beside every highlight.",
           "scope": "resource"
         }
       }

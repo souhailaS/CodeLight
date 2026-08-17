@@ -14,6 +14,14 @@ export class Visibility implements vscode.Disposable {
     return this.shown;
   }
 
+  show(): boolean {
+    if (this.shown) {
+      return false;
+    }
+    this.toggle();
+    return true;
+  }
+
   toggle(): void {
     this.shown = !this.shown;
     void vscode.commands.executeCommand("setContext", "codelight.hidden", !this.shown);

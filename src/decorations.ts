@@ -1,7 +1,15 @@
 import * as vscode from "vscode";
 import { LiveRanges } from "./live";
 import { Annotation } from "./model";
-import { PaletteColor, readInlineMode, readOpacity, readPalette, resolveColor, toRgba } from "./palette";
+import {
+  PaletteColor,
+  readGutterMarks,
+  readInlineMode,
+  readOpacity,
+  readPalette,
+  resolveColor,
+  toRgba
+} from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
@@ -38,7 +46,8 @@ export class HighlightRenderer implements vscode.Disposable {
         if (
           event.affectsConfiguration("codelight.palette") ||
           event.affectsConfiguration("codelight.highlightOpacity") ||
-          event.affectsConfiguration("codelight.inlineComments")
+          event.affectsConfiguration("codelight.inlineComments") ||
+          event.affectsConfiguration("codelight.gutterMarks")
         ) {
           this.rebuild();
           this.renderAll();
@@ -159,6 +168,7 @@ export class HighlightRenderer implements vscode.Disposable {
     this.palette = readPalette(resource);
     const opacity = readOpacity(resource);
     this.inline = readInlineMode(resource);
+    const marks = readGutterMarks(resource);
     this.badge?.dispose();
     this.badge = vscode.window.createTextEditorDecorationType({
       after: {
@@ -180,13 +190,15 @@ export class HighlightRenderer implements vscode.Disposable {
           rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
         })
       );
-      this.gutters.set(
-        color.id,
-        vscode.window.createTextEditorDecorationType({
-          gutterIconPath: this.gutterIcon(color.hex),
-          gutterIconSize: "auto"
-        })
-      );
+      if (marks) {
+        this.gutters.set(
+          color.id,
+          vscode.window.createTextEditorDecorationType({
+            gutterIconPath: this.gutterIcon(color.hex),
+            gutterIconSize: "auto"
+          })
+        );
+      }
     }
   }
 
