@@ -80,8 +80,9 @@ export class HighlightRenderer implements vscode.Disposable {
       type.dispose();
     }
     this.types = new Map();
-    this.palette = readPalette();
-    const opacity = readOpacity();
+    const resource = this.store.rootUri;
+    this.palette = readPalette(resource);
+    const opacity = readOpacity(resource);
     for (const color of this.palette) {
       this.types.set(
         color.id,

@@ -4,8 +4,6 @@ import { toRelativePath } from "./paths";
 import { shiftSpan, Span } from "./ranges";
 import { AnnotationStore } from "./store";
 
-const EXTERNAL_FLUSH_DELAY_MS = 200;
-
 export type SpanMap = Map<string, Span>;
 
 interface Placement {
@@ -22,7 +20,6 @@ interface DocumentState {
 export class LiveRanges implements vscode.Disposable {
   private readonly documents = new Map<string, DocumentState>();
   private readonly holding = new Set<string>();
-  private readonly externalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly disposables: vscode.Disposable[] = [];
   private readonly changeEmitter = new vscode.EventEmitter<vscode.TextDocument>();
 
@@ -67,7 +64,6 @@ export class LiveRanges implements vscode.Disposable {
 
   async flushDocument(document: vscode.TextDocument): Promise<void> {
     const key = document.uri.toString();
-    this.clearExternalTimer(key);
     const relative = this.relativePath(document);
     const state = relative ? this.documents.get(key) : undefined;
     if (!relative || !state || state.spans.size === 0) {
@@ -79,6 +75,9 @@ export class LiveRanges implements vscode.Disposable {
       const span = state.spans.get(annotation.id);
       const placement = state.placements.get(annotation.id);
       if (!span || !placement) {
+        continue;
+      }
+      if (span.start === span.end) {
         continue;
       }
       const current = this.spanOf(document, annotation);
@@ -111,24 +110,16 @@ export class LiveRanges implements vscode.Disposable {
       }
       return changed;
     });
-    if (saved) {
+    const stillPresent = [...moved.keys()].some((id) => this.store.byId(id) !== undefined);
+    if (saved || !stillPresent) {
       this.holding.delete(key);
     }
   }
 
   private forget(document: vscode.TextDocument): void {
     const key = document.uri.toString();
-    this.clearExternalTimer(key);
     this.documents.delete(key);
     this.holding.delete(key);
-  }
-
-  private clearExternalTimer(key: string): void {
-    const timer = this.externalTimers.get(key);
-    if (timer) {
-      clearTimeout(timer);
-      this.externalTimers.delete(key);
-    }
   }
 
   private seedOpenDocuments(): void {
@@ -211,7 +202,7 @@ export class LiveRanges implements vscode.Disposable {
         state.spans.set(id, { start, end: Math.max(start, end) });
       }
       state.eol = event.document.eol;
-      this.afterShift(event.document, state);
+      this.afterShift(event.document);
       return;
     }
     for (const change of event.contentChanges) {
@@ -223,33 +214,15 @@ export class LiveRanges implements vscode.Disposable {
       }
     }
     this.refreshPlacements(event.document, state);
-    this.afterShift(event.document, state);
+    this.afterShift(event.document);
   }
 
-  private afterShift(document: vscode.TextDocument, state: DocumentState): void {
-    const key = document.uri.toString();
-    this.holding.add(key);
+  private afterShift(document: vscode.TextDocument): void {
+    this.holding.add(document.uri.toString());
     this.changeEmitter.fire(document);
-    if (document.isDirty) {
-      return;
-    }
-    this.clearExternalTimer(key);
-    this.externalTimers.set(
-      key,
-      setTimeout(() => {
-        this.externalTimers.delete(key);
-        if (this.documents.get(key) === state) {
-          void this.flushDocument(document);
-        }
-      }, EXTERNAL_FLUSH_DELAY_MS)
-    );
   }
 
   dispose(): void {
-    for (const timer of this.externalTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.externalTimers.clear();
     this.changeEmitter.dispose();
     for (const disposable of this.disposables) {
       disposable.dispose();

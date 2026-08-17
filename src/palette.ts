@@ -19,8 +19,8 @@ export const DEFAULT_OPACITY = 0.3;
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
-function configuration(): vscode.WorkspaceConfiguration {
-  return vscode.workspace.getConfiguration("codelight");
+function configuration(resource?: vscode.Uri): vscode.WorkspaceConfiguration {
+  return vscode.workspace.getConfiguration("codelight", resource ?? null);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,8 +40,8 @@ function parseColor(value: unknown): PaletteColor | undefined {
   return { id, label, hex };
 }
 
-export function readPalette(): PaletteColor[] {
-  const configured = configuration().get<unknown>("palette");
+export function readPalette(resource?: vscode.Uri): PaletteColor[] {
+  const configured = configuration(resource).get<unknown>("palette");
   if (!Array.isArray(configured) || configured.length === 0) {
     return [...DEFAULT_PALETTE];
   }
@@ -58,8 +58,8 @@ export function readPalette(): PaletteColor[] {
   return palette.length > 0 ? palette : [...DEFAULT_PALETTE];
 }
 
-export function readOpacity(): number {
-  const configured = configuration().get<unknown>("highlightOpacity");
+export function readOpacity(resource?: vscode.Uri): number {
+  const configured = configuration(resource).get<unknown>("highlightOpacity");
   if (typeof configured !== "number" || !Number.isFinite(configured)) {
     return DEFAULT_OPACITY;
   }

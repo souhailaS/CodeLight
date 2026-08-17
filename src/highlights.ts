@@ -32,7 +32,9 @@ function snippet(annotation: Annotation): string {
 }
 
 function colorIcon(color: PaletteColor): vscode.ThemeIcon {
-  const isDefault = DEFAULT_PALETTE.some((entry) => entry.id === color.id);
+  const isDefault = DEFAULT_PALETTE.some(
+    (entry) => entry.id === color.id && entry.hex.toLowerCase() === color.hex.toLowerCase()
+  );
   return isDefault
     ? new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor(`codelight.${color.id}`))
     : new vscode.ThemeIcon("circle-filled");
@@ -63,11 +65,11 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(): Promise<Annotation | undefined> {
+  async add(): Promise<Annotation[]> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
-      return undefined;
+      return [];
     }
     const root = this.store.rootUri;
     const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
@@ -78,35 +80,43 @@ export class HighlightCommands {
           ? `CodeLight is tracking the folder ${folder} and cannot annotate files outside it.`
           : "CodeLight needs an open folder."
       );
-      return undefined;
+      return [];
     }
-    const range = editor.selection.isEmpty
-      ? editor.document.lineAt(editor.selection.active.line).range
-      : new vscode.Range(editor.selection.start, editor.selection.end);
-    if (range.isEmpty) {
+    const ranges: vscode.Range[] = [];
+    for (const selection of editor.selections) {
+      const range = selection.isEmpty
+        ? editor.document.lineAt(selection.active.line).range
+        : new vscode.Range(selection.start, selection.end);
+      if (!range.isEmpty) {
+        ranges.push(range);
+      }
+    }
+    if (ranges.length === 0) {
       void vscode.window.showWarningMessage(
-        editor.selection.isEmpty
+        editor.selections.every((selection) => selection.isEmpty)
           ? "This line is empty. Select some text to highlight."
           : "Select some text to highlight."
       );
-      return undefined;
+      return [];
     }
-    const anchor = buildAnchor(editor.document, range);
+    const anchors = ranges.map((range) => buildAnchor(editor.document, range));
     const version = editor.document.version;
     const author = await this.identity.require();
     if (!author) {
-      return undefined;
+      return [];
     }
     const color = await pickColor(this.renderer.colors, "CodeLight");
     if (!color) {
-      return undefined;
+      return [];
     }
     if (editor.document.version !== version) {
-      void vscode.window.showWarningMessage("The file changed while the color picker was open. Select the text again.");
-      return undefined;
+      void vscode.window.showWarningMessage(
+        "The file changed while the color picker was open. Select the text again."
+      );
+      return [];
     }
     const now = timestamp();
-    const annotation: Annotation = {
+    const created = ranges.map((range, index) => ({
       id: newId(),
       file: relative,
       range: {
@@ -115,19 +125,24 @@ export class HighlightCommands {
         endLine: range.end.line,
         endCharacter: range.end.character
       },
-      anchor,
+      anchor: anchors[index],
       color: color.id,
       author: { login: author.login, id: author.id },
       createdAt: now,
       updatedAt: now,
       comments: []
-    };
-    const saved = await this.store.add(annotation);
+    })) as Annotation[];
+    const saved = await this.store.transaction((annotations) => {
+      for (const annotation of created) {
+        annotations.set(annotation.id, annotation);
+      }
+      return true;
+    });
     if (!saved) {
       void vscode.window.showWarningMessage("CodeLight could not save the highlight.");
-      return undefined;
+      return [];
     }
-    return annotation;
+    return created;
   }
 
   atCursor(): Annotation[] {
@@ -154,16 +169,16 @@ export class HighlightCommands {
       void vscode.window.showInformationMessage("No CodeLight highlight at the cursor.");
       return undefined;
     }
-    if (candidates.length === 1) {
-      return candidates[0];
-    }
     const editor = vscode.window.activeTextEditor;
     const spans = editor ? this.live.spansFor(editor.document) : undefined;
+    const isOrphan = (annotation: Annotation): boolean =>
+      editor !== undefined && this.live.rangeFor(editor.document, annotation, spans).isEmpty;
+    if (candidates.length === 1 && !isOrphan(candidates[0])) {
+      return candidates[0];
+    }
     const picked = await vscode.window.showQuickPick(
       candidates.map((annotation) => {
-        const orphan =
-          editor !== undefined &&
-          this.live.rangeFor(editor.document, annotation, spans).isEmpty;
+        const orphan = isOrphan(annotation);
         return {
           label: orphan ? `${snippet(annotation)} (text deleted)` : snippet(annotation),
           description: `${annotation.color} by ${annotation.author.login}`,
