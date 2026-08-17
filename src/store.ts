@@ -5,7 +5,7 @@ import { resolveRoot, storeUri } from "./paths";
 const RELOAD_DEBOUNCE_MS = 150;
 
 type DiskState =
-  | { status: "ok"; annotations: Map<string, Annotation>; raw: string; dropped: number }
+  | { status: "ok"; annotations: Map<string, Annotation>; raw: string; dropped: number; rejected: unknown[] }
   | { status: "missing" }
   | { status: "error"; message: string };
 
@@ -125,10 +125,11 @@ export class AnnotationStore implements vscode.Disposable {
         return false;
       }
       const annotations = disk.status === "ok" ? disk.annotations : new Map<string, Annotation>();
+      const rejected = disk.status === "ok" ? disk.rejected : [];
       if (!apply(annotations)) {
         return false;
       }
-      const content = serializeStore([...annotations.values()]);
+      const content = serializeStore([...annotations.values()], rejected);
       try {
         await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
         await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
@@ -152,7 +153,7 @@ export class AnnotationStore implements vscode.Disposable {
     let raw: string;
     try {
       const bytes = await vscode.workspace.fs.readFile(target);
-      raw = Buffer.from(bytes).toString("utf8");
+      raw = Buffer.from(bytes).toString("utf8").replace(/^\uFEFF/, "");
     } catch (error) {
       if (isMissingFile(error)) {
         return { status: "missing" };
@@ -165,6 +166,7 @@ export class AnnotationStore implements vscode.Disposable {
         status: "ok",
         raw,
         dropped: parsed.dropped,
+        rejected: parsed.rejected,
         annotations: new Map(parsed.annotations.map((entry) => [entry.id, entry]))
       };
     } catch (error) {
@@ -175,6 +177,9 @@ export class AnnotationStore implements vscode.Disposable {
   private async bind(): Promise<void> {
     const root = await resolveRoot(this.root);
     if (this.root?.toString() === root?.toString()) {
+      if (root) {
+        await this.load();
+      }
       return;
     }
     this.generation += 1;

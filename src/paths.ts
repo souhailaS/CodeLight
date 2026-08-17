@@ -7,23 +7,37 @@ export function storeUri(root: vscode.Uri): vscode.Uri {
   return vscode.Uri.joinPath(root, ".vscode", "codelight.json");
 }
 
+async function hasStore(root: vscode.Uri): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(storeUri(root));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveRoot(preferred?: vscode.Uri): Promise<vscode.Uri | undefined> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     return undefined;
   }
-  for (const folder of folders) {
-    try {
-      await vscode.workspace.fs.stat(storeUri(folder.uri));
-      return folder.uri;
-    } catch {
-      continue;
-    }
-  }
   const stillOpen = preferred
     ? folders.find((folder) => folder.uri.toString() === preferred.toString())
     : undefined;
-  return stillOpen ? stillOpen.uri : folders[0].uri;
+  if (stillOpen && (await hasStore(stillOpen.uri))) {
+    return stillOpen.uri;
+  }
+  for (const folder of folders) {
+    if (await hasStore(folder.uri)) {
+      return folder.uri;
+    }
+  }
+  if (stillOpen) {
+    return stillOpen.uri;
+  }
+  const active = vscode.window.activeTextEditor;
+  const activeFolder = active ? vscode.workspace.getWorkspaceFolder(active.document.uri) : undefined;
+  return activeFolder ? activeFolder.uri : folders[0].uri;
 }
 
 function comparable(value: string): string {

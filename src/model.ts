@@ -36,14 +36,8 @@ export interface Annotation {
   createdAt: string;
   updatedAt: string;
   comments: Comment[];
+  rejectedComments?: unknown[];
 }
-
-export interface StoreFile {
-  version: number;
-  annotations: Annotation[];
-}
-
-export const EMPTY_STORE: StoreFile = { version: STORE_VERSION, annotations: [] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -144,10 +138,12 @@ function parseAnnotation(value: unknown, dropped: DropCounter): Annotation | und
   const rawComments = Array.isArray(value.comments) ? value.comments : [];
   const seenComments = new Set<string>();
   const comments: Comment[] = [];
+  const rejectedComments: unknown[] = [];
   for (const entry of rawComments) {
     const comment = parseComment(entry);
     if (!comment || seenComments.has(comment.id)) {
       dropped.count += 1;
+      rejectedComments.push(entry);
       continue;
     }
     seenComments.add(comment.id);
@@ -162,13 +158,15 @@ function parseAnnotation(value: unknown, dropped: DropCounter): Annotation | und
     author,
     createdAt,
     updatedAt: readString(value.updatedAt, createdAt),
-    comments
+    comments,
+    rejectedComments
   };
 }
 
 export interface ParsedStore {
   annotations: Annotation[];
   dropped: number;
+  rejected: unknown[];
 }
 
 export function parseStore(raw: string): ParsedStore {
@@ -190,19 +188,21 @@ export function parseStore(raw: string): ParsedStore {
   const seen = new Set<string>();
   const annotations: Annotation[] = [];
   const dropped: DropCounter = { count: 0 };
+  const rejected: unknown[] = [];
   for (const entry of rawAnnotations) {
     const annotation = parseAnnotation(entry, dropped);
     if (!annotation || seen.has(annotation.id)) {
       dropped.count += 1;
+      rejected.push(entry);
       continue;
     }
     seen.add(annotation.id);
     annotations.push(annotation);
   }
-  return { annotations, dropped: dropped.count };
+  return { annotations, dropped: dropped.count, rejected };
 }
 
-export function sortAnnotations(annotations: readonly Annotation[]): Annotation[] {
+function sortAnnotations(annotations: readonly Annotation[]): Annotation[] {
   return [...annotations].sort((a, b) => {
     if (a.file !== b.file) {
       return a.file < b.file ? -1 : 1;
@@ -217,7 +217,21 @@ export function sortAnnotations(annotations: readonly Annotation[]): Annotation[
   });
 }
 
-export function serializeStore(annotations: readonly Annotation[]): string {
-  const payload: StoreFile = { version: STORE_VERSION, annotations: sortAnnotations(annotations) };
+function toWire(annotation: Annotation): Record<string, unknown> {
+  const { rejectedComments, ...rest } = annotation;
+  if (!rejectedComments || rejectedComments.length === 0) {
+    return rest;
+  }
+  return { ...rest, comments: [...annotation.comments, ...rejectedComments] };
+}
+
+export function serializeStore(
+  annotations: readonly Annotation[],
+  rejected: readonly unknown[] = []
+): string {
+  const payload = {
+    version: STORE_VERSION,
+    annotations: [...sortAnnotations(annotations).map(toWire), ...rejected]
+  };
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
