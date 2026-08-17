@@ -130,6 +130,11 @@
         "icon": "$(filter-filled)"
       },
       {
+        "command": "codelight.convertStorage",
+        "title": "Convert Annotation Storage Format",
+        "category": "CodeLight"
+      },
+      {
         "command": "codelight.deleteOrphansEverywhere",
         "title": "Delete All Orphaned Highlights",
         "category": "CodeLight",
@@ -340,15 +345,16 @@
         "codelight.storage": {
           "type": "string",
           "default": "json",
+          "scope": "resource",
           "enum": [
             "json",
             "compressed"
           ],
           "enumDescriptions": [
-            "Keep annotations in .vscode/codelight.json as readable text",
-            "Keep annotations in .vscode/codelight.json.gz as gzipped bytes"
+            "Create .vscode/codelight.json, a text file git can diff and merge",
+            "Create .vscode/codelight.json.gz, a smaller binary file git cannot diff or merge"
           ],
-          "description": "How the shared annotation file is stored. Compressed storage makes the file much smaller, but it is a binary file that git cannot diff or merge."
+          "description": "Format used only when CodeLight creates an annotation file that does not exist yet. An existing file keeps its own format until you run the command Convert Annotation Storage Format."
         }
       }
     },

@@ -16,11 +16,7 @@ export function storeUri(root: vscode.Uri, mode: StorageMode): vscode.Uri {
   return vscode.Uri.joinPath(root, ".vscode", STORE_NAMES[mode]);
 }
 
-export function otherMode(mode: StorageMode): StorageMode {
-  return mode === "compressed" ? "json" : "compressed";
-}
-
-async function exists(target: vscode.Uri): Promise<boolean> {
+export async function exists(target: vscode.Uri): Promise<boolean> {
   try {
     await vscode.workspace.fs.stat(target);
     return true;

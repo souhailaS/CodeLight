@@ -2,7 +2,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import * as vscode from "vscode";
 import { Annotation, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
-import { StorageMode, otherMode, resolveRoot, STORE_PATTERN, storeUri } from "./paths";
+import { exists, resolveRoot, STORE_PATTERN, storeUri } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
 const MAX_STORE_BYTES = 64 * 1024 * 1024;
@@ -18,6 +18,17 @@ type DiskState =
     }
   | { status: "missing" }
   | { status: "error"; message: string };
+
+interface StoreFiles {
+  plain: vscode.Uri;
+  compressed: vscode.Uri;
+  fresh: vscode.Uri;
+}
+
+interface ActiveStore {
+  target: vscode.Uri;
+  duplicate: boolean;
+}
 
 function isMissingFile(error: unknown): boolean {
   if (error instanceof vscode.FileSystemError) {
@@ -58,8 +69,9 @@ export class AnnotationStore implements vscode.Disposable {
   private lastSerialized: string | undefined;
   private reportedFailure: string | undefined;
   private reportedDropped = 0;
+  private reportedDuplicate = false;
   private generation = 0;
-  private mode: StorageMode = readStorageMode();
+  private active: vscode.Uri | undefined;
 
   readonly onDidChange = this.emitter.event;
 
@@ -71,11 +83,6 @@ export class AnnotationStore implements vscode.Disposable {
       discovery,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         void this.bind();
-      }),
-      vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration("codelight.storage")) {
-          void this.applyMode();
-        }
       })
     );
   }
@@ -93,11 +100,10 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   get location(): vscode.Uri | undefined {
-    return this.root ? storeUri(this.root, this.mode) : undefined;
-  }
-
-  private get fallbackLocation(): vscode.Uri | undefined {
-    return this.root ? storeUri(this.root, otherMode(this.mode)) : undefined;
+    if (this.active) {
+      return this.active;
+    }
+    return this.root ? storeUri(this.root, readStorageMode(this.root)) : undefined;
   }
 
   get rootUri(): vscode.Uri | undefined {
@@ -148,6 +154,86 @@ export class AnnotationStore implements vscode.Disposable {
     await this.load();
   }
 
+  async convertStorage(): Promise<boolean> {
+    const files = this.snapshot();
+    if (!files) {
+      void vscode.window.showWarningMessage("CodeLight needs an open folder.");
+      return false;
+    }
+    const generation = this.generation;
+    const chosen = await this.enqueue(() => this.pick(files));
+    if (generation !== this.generation) {
+      return false;
+    }
+    if (chosen.duplicate) {
+      void vscode.window.showWarningMessage(
+        `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. Remove the one you do not want before converting.`
+      );
+      return false;
+    }
+    const source = chosen.target;
+    if (!(await exists(source))) {
+      void vscode.window.showInformationMessage("CodeLight has no annotation file to convert yet.");
+      return false;
+    }
+    const destination = isCompressed(source) ? files.plain : files.compressed;
+    const question = isCompressed(destination)
+      ? `Convert ${source.fsPath} into ${destination.fsPath}? The compressed file is much smaller, but git cannot diff or merge it.`
+      : `Convert ${source.fsPath} into ${destination.fsPath}? The plain file is larger, and git can diff and merge it again.`;
+    const answer = await vscode.window.showWarningMessage(question, { modal: true }, "Convert");
+    if (answer !== "Convert") {
+      return false;
+    }
+    if (generation !== this.generation) {
+      return false;
+    }
+    return this.enqueue(async () => {
+      if (generation !== this.generation) {
+        return false;
+      }
+      const disk = await this.readDisk(source);
+      if (generation !== this.generation) {
+        return false;
+      }
+      if (disk.status === "error") {
+        this.reportFailure(disk.message);
+        return false;
+      }
+      if (disk.status === "missing") {
+        void vscode.window.showWarningMessage(`CodeLight could not find ${source.fsPath} any more.`);
+        return false;
+      }
+      if (await exists(destination)) {
+        void vscode.window.showWarningMessage(
+          `CodeLight left ${source.fsPath} alone because ${destination.fsPath} already exists.`
+        );
+        return false;
+      }
+      try {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(destination, ".."));
+        await vscode.workspace.fs.writeFile(destination, encodeStore(disk.raw, destination));
+      } catch (error) {
+        this.reportFailure(
+          `CodeLight could not save annotations to ${destination.fsPath}. ${describe(error)}`
+        );
+        return false;
+      }
+      if (!(await this.discard(source))) {
+        return false;
+      }
+      if (generation !== this.generation) {
+        return true;
+      }
+      this.active = destination;
+      this.annotations = disk.annotations;
+      this.lastSerialized = disk.raw;
+      this.reportedFailure = undefined;
+      this.emitter.fire();
+      void vscode.window.showInformationMessage(`CodeLight now stores annotations in ${destination.fsPath}.`);
+      return true;
+    });
+  }
+
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
     const run = this.queue.then(task, task);
     this.queue = run.then(
@@ -157,9 +243,36 @@ export class AnnotationStore implements vscode.Disposable {
     return run;
   }
 
+  private snapshot(): StoreFiles | undefined {
+    const root = this.root;
+    if (!root) {
+      return undefined;
+    }
+    return {
+      plain: storeUri(root, "json"),
+      compressed: storeUri(root, "compressed"),
+      fresh: storeUri(root, readStorageMode(root))
+    };
+  }
+
+  private async pick(files: StoreFiles): Promise<ActiveStore> {
+    const hasPlain = await exists(files.plain);
+    const hasCompressed = await exists(files.compressed);
+    if (hasPlain && hasCompressed) {
+      return { target: files.plain, duplicate: true };
+    }
+    if (hasCompressed) {
+      return { target: files.compressed, duplicate: false };
+    }
+    if (hasPlain) {
+      return { target: files.plain, duplicate: false };
+    }
+    return { target: files.fresh, duplicate: false };
+  }
+
   private async commit(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
-    const target = this.location;
-    if (!target) {
+    const files = this.snapshot();
+    if (!files) {
       return false;
     }
     const generation = this.generation;
@@ -167,7 +280,13 @@ export class AnnotationStore implements vscode.Disposable {
       if (generation !== this.generation) {
         return false;
       }
-      const disk = await this.readStore(target);
+      const chosen = await this.pick(files);
+      if (generation !== this.generation) {
+        return false;
+      }
+      this.warnAboutDuplicate(chosen.duplicate, files);
+      const target = chosen.target;
+      const disk = await this.readDisk(target);
       if (generation !== this.generation) {
         return false;
       }
@@ -189,30 +308,16 @@ export class AnnotationStore implements vscode.Disposable {
         this.scheduleReload();
         return false;
       }
-      if (disk.status === "ok" && disk.source.toString() !== target.toString()) {
-        await this.discard(disk.source);
-      }
       if (generation !== this.generation) {
         return true;
       }
+      this.active = target;
       this.annotations = annotations;
       this.lastSerialized = content;
       this.reportedFailure = undefined;
       this.emitter.fire();
       return true;
     });
-  }
-
-  private async readStore(target: vscode.Uri): Promise<DiskState> {
-    const disk = await this.readDisk(target);
-    if (disk.status !== "missing") {
-      return disk;
-    }
-    const fallback = this.fallbackLocation;
-    if (!fallback) {
-      return disk;
-    }
-    return this.readDisk(fallback);
   }
 
   private async readDisk(target: vscode.Uri): Promise<DiskState> {
@@ -243,7 +348,6 @@ export class AnnotationStore implements vscode.Disposable {
 
   private async bind(): Promise<void> {
     const root = await resolveRoot(this.root);
-    this.mode = readStorageMode(root);
     if (this.root?.toString() === root?.toString()) {
       if (root) {
         await this.load();
@@ -258,10 +362,12 @@ export class AnnotationStore implements vscode.Disposable {
     this.watcher?.dispose();
     this.watcher = undefined;
     this.root = root;
+    this.active = undefined;
     this.annotations = new Map();
     this.lastSerialized = undefined;
     this.reportedFailure = undefined;
     this.reportedDropped = 0;
+    this.reportedDuplicate = false;
     if (!root) {
       this.emitter.fire();
       return;
@@ -286,8 +392,8 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   private async load(): Promise<void> {
-    const target = this.location;
-    if (!target) {
+    const files = this.snapshot();
+    if (!files) {
       return;
     }
     const generation = this.generation;
@@ -295,7 +401,13 @@ export class AnnotationStore implements vscode.Disposable {
       if (generation !== this.generation) {
         return;
       }
-      const disk = await this.readStore(target);
+      const chosen = await this.pick(files);
+      if (generation !== this.generation) {
+        return;
+      }
+      this.warnAboutDuplicate(chosen.duplicate, files);
+      const target = chosen.target;
+      const disk = await this.readDisk(target);
       if (generation !== this.generation) {
         return;
       }
@@ -305,6 +417,7 @@ export class AnnotationStore implements vscode.Disposable {
       }
       this.reportedFailure = undefined;
       if (disk.status === "missing") {
+        this.active = undefined;
         if (this.annotations.size === 0 && this.lastSerialized === undefined) {
           return;
         }
@@ -313,39 +426,15 @@ export class AnnotationStore implements vscode.Disposable {
         this.emitter.fire();
         return;
       }
-      let origin = disk.source;
-      if (origin.toString() !== target.toString()) {
-        const moved = await this.converge(origin, target, disk.raw);
-        if (generation !== this.generation) {
-          return;
-        }
-        if (moved) {
-          origin = target;
-        }
-      } else if (disk.raw === this.lastSerialized) {
+      if (disk.raw === this.lastSerialized && this.active?.toString() === target.toString()) {
         return;
       }
+      this.active = target;
       this.annotations = disk.annotations;
       this.lastSerialized = disk.raw;
-      this.warnAboutDropped(disk.dropped, origin);
+      this.warnAboutDropped(disk.dropped, disk.source);
       this.emitter.fire();
     });
-  }
-
-  private async applyMode(): Promise<void> {
-    this.mode = readStorageMode(this.root);
-    await this.load();
-  }
-
-  private async converge(source: vscode.Uri, target: vscode.Uri, raw: string): Promise<boolean> {
-    try {
-      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
-      await vscode.workspace.fs.writeFile(target, encodeStore(raw, target));
-    } catch (error) {
-      this.reportFailure(`CodeLight could not save annotations to ${target.fsPath}. ${describe(error)}`);
-      return false;
-    }
-    return this.discard(source);
   }
 
   private async discard(previous: vscode.Uri): Promise<boolean> {
@@ -367,6 +456,16 @@ export class AnnotationStore implements vscode.Disposable {
     }
     this.reportedFailure = message;
     void vscode.window.showErrorMessage(message);
+  }
+
+  private warnAboutDuplicate(duplicate: boolean, files: StoreFiles): void {
+    if (!duplicate || this.reportedDuplicate) {
+      return;
+    }
+    this.reportedDuplicate = true;
+    void vscode.window.showWarningMessage(
+      `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${files.plain.fsPath} and leaving the other file alone.`
+    );
   }
 
   private warnAboutDropped(dropped: number, target: vscode.Uri): void {

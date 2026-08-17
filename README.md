@@ -42,7 +42,9 @@ Everything else lives in the command palette under **CodeLight**, in the editor 
 | `codelight.palette` | built in colours | The colours offered in the picker |
 | `codelight.highlightOpacity` | `0.3` | How strong the highlight background is |
 | `codelight.inlineComments` | `preview` | Show the latest comment, a count, or nothing |
-| `codelight.storage` | `json` | Keep the store as readable JSON, or as a smaller gzipped file that git cannot diff |
+| `codelight.storage` | `json` | Format used when CodeLight creates the annotation file. An existing file keeps its own format |
+
+The compressed format writes `.vscode/codelight.json.gz`, which is much smaller but is a binary file that git cannot diff or merge. To move an existing store between the two formats, run **CodeLight: Convert Annotation Storage Format**, which writes the new file and removes the old one after you confirm.
 
 ## Installing
 
