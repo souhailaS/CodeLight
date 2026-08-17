@@ -3,14 +3,47 @@ import { isSafeRelativePath } from "./model";
 
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin";
 
-export function storeUri(root: vscode.Uri): vscode.Uri {
-  return vscode.Uri.joinPath(root, ".vscode", "codelight.json");
+export type StorageMode = "json" | "compressed";
+
+const STORE_NAMES: Record<StorageMode, string> = {
+  json: "codelight.json",
+  compressed: "codelight.json.gz"
+};
+
+export const STORE_PATTERN = ".vscode/{codelight.json,codelight.json.gz}";
+
+export function storeUri(root: vscode.Uri, mode: StorageMode): vscode.Uri {
+  return vscode.Uri.joinPath(root, ".vscode", STORE_NAMES[mode]);
+}
+
+export function isMissingFile(error: unknown): boolean {
+  if (error instanceof vscode.FileSystemError) {
+    return error.code === "FileNotFound";
+  }
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
+}
+
+export async function statFile(target: vscode.Uri): Promise<vscode.FileStat | undefined> {
+  try {
+    return await vscode.workspace.fs.stat(target);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+export async function exists(target: vscode.Uri): Promise<boolean> {
+  return (await statFile(target)) !== undefined;
 }
 
 async function hasStore(root: vscode.Uri): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(storeUri(root));
-    return true;
+    if (await exists(storeUri(root, "json"))) {
+      return true;
+    }
+    return await exists(storeUri(root, "compressed"));
   } catch {
     return false;
   }

@@ -167,6 +167,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await ready;
       await comments.remove(nodeId(target));
     }),
+    vscode.commands.registerCommand("codelight.convertStorage", async () => {
+      await ready;
+      await store.convertStorage();
+    }),
     vscode.commands.registerCommand("codelight.showStatus", async () => {
       await ready;
       if (!store.isReady) {

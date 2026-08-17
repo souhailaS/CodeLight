@@ -16,7 +16,7 @@ Shared highlights and comments for VS Code, kept beside your code instead of ins
 
 **Keep them in a layer of their own.** Plenty of what you want to write down is not meant to ship. A doubt about a function, a reminder to check something later, a question for a colleague tomorrow. Put that in the source and it becomes part of the product and part of everyone's diff, and someone has to remember to take it out again.
 
-CodeLight keeps those notes beside the code rather than inside it. Commit `.vscode/codelight.json` and the whole team reads the layer. Add it to your `.gitignore` and it never leaves your machine, so you can be as blunt as you like while reading and none of it ever reaches the repository.
+CodeLight keeps those notes beside the code rather than inside it. Commit the CodeLight file in `.vscode`, either `codelight.json` or `codelight.json.gz`, and the whole team reads the layer. Add it to your `.gitignore` and it never leaves your machine, so you can be as blunt as you like while reading and none of it ever reaches the repository.
 
 ## What it does
 
@@ -24,7 +24,7 @@ CodeLight keeps those notes beside the code rather than inside it. Commit `.vsco
 * Attach comments to a highlight and reply to your colleagues, each one attributed to a verified GitHub account.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
-* Keep everything in `.vscode/codelight.json`, so annotations travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.
+* Keep everything in the CodeLight file in `.vscode`, so annotations travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.
 
 Highlights follow your edits. Insert lines above one and it moves with the text. Delete the text it marks and CodeLight looks for it elsewhere in the file before giving up, and if the text comes back the highlight returns with it.
 
@@ -44,6 +44,11 @@ Everything else lives in the command palette under **CodeLight**, in the editor 
 | `codelight.palette` | built in colours | The colours offered in the picker |
 | `codelight.highlightOpacity` | `0.3` | How strong the highlight background is |
 | `codelight.inlineComments` | `preview` | Show the latest comment, a count, or nothing |
+| `codelight.storage` | `json` | Format used when CodeLight creates the annotation file. An existing file keeps its own format |
+
+The compressed format writes `.vscode/codelight.json.gz`, which is much smaller but is a binary file that git cannot diff or merge. To move an existing store between the two formats, run **CodeLight: Convert Annotation Storage Format**, which writes the new file and removes the old one after you confirm.
+
+If you commit the compressed file, add `*.json.gz binary` to your `.gitattributes` first. A repository that forces `* text` rewrites line endings on checkout, which corrupts the gzip stream and leaves the store unreadable.
 
 ## Installing
 

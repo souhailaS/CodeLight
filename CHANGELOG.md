@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+An optional compressed storage format, for projects with very large annotation files.
+
+* Set `codelight.storage` to `compressed` and a store CodeLight creates is written as a gzipped file, roughly fifteen times smaller.
+* The file on disk decides the format, so opening a project never rewrites or deletes what is already there.
+* Convert Annotation Storage Format moves an existing store between the two, confirming first and only removing the old file once the new one reads back correctly.
+* A local store is written to a temporary file that is renamed over the old one, so an interrupted save leaves the previous store intact. A store reached through a symlink or a hard link, one on a remote filesystem, and one in a folder that does not allow new files are written in place to keep the file itself, so an interrupted save there can still truncate it. The last case says so once per session.
+
 ## 0.3.0
 
 A second view in the activity bar lists the comments of the file you are reading, stacked as cards.
