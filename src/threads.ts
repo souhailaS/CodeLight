@@ -76,7 +76,15 @@ export class ThreadView implements vscode.Disposable {
       store.onDidChange(() => this.sync()),
       identity.onDidChange(() => this.sync()),
       vscode.workspace.onDidOpenTextDocument(() => this.sync()),
-      vscode.workspace.onDidCloseTextDocument(() => this.sync()),
+      vscode.workspace.onDidCloseTextDocument((document) => {
+        for (const thread of [...this.pending.keys()]) {
+          if (thread.uri.toString() === document.uri.toString()) {
+            this.pending.delete(thread);
+            thread.dispose();
+          }
+        }
+        this.sync();
+      }),
       live.onDidShift((document) => this.reposition(document))
     );
     this.sync();
@@ -116,12 +124,22 @@ export class ThreadView implements vscode.Disposable {
       updatedAt: now
     };
     const owned = this.owners.get(reply.thread);
-    if (owned !== undefined && this.store.byId(owned)?.orphaned === true) {
-      const rescued = await rescue(body);
-      void vscode.window.showWarningMessage(
-        withRescue("That highlight lost its text, so the comment was not saved.", rescued)
+    if (owned !== undefined) {
+      const annotation = this.store.byId(owned);
+      const document = vscode.workspace.textDocuments.find(
+        (entry) => entry.uri.toString() === reply.thread.uri.toString()
       );
-      return;
+      const collapsed =
+        annotation !== undefined &&
+        document !== undefined &&
+        this.live.rangeFor(document, annotation).isEmpty;
+      if (annotation?.orphaned === true || collapsed) {
+        const rescued = await rescue(body);
+        void vscode.window.showWarningMessage(
+          withRescue("That highlight lost its text, so the comment was not saved.", rescued)
+        );
+        return;
+      }
     }
     const annotationId = owned ?? (await this.createAnnotation(reply.thread, comment));
     if (annotationId === undefined) {
@@ -138,10 +156,15 @@ export class ThreadView implements vscode.Disposable {
     {
       let ran = false;
       let found = false;
+      let lost = false;
       const saved = await this.store.transaction((annotations) => {
         ran = true;
         const current = annotations.get(annotationId);
         if (!current) {
+          return false;
+        }
+        if (current.orphaned === true) {
+          lost = true;
           return false;
         }
         found = true;
@@ -156,9 +179,11 @@ export class ThreadView implements vscode.Disposable {
         const rescued = await rescue(body);
         const reason = !ran
           ? "CodeLight could not update the shared file."
-          : found
-            ? "CodeLight could not save the comment."
-            : "That highlight is no longer in the shared file.";
+          : lost
+            ? "That highlight lost its text, so the comment was not saved."
+            : found
+              ? "CodeLight could not save the comment."
+              : "That highlight is no longer in the shared file.";
         if (ran && !found) {
           await this.store.refresh();
         }
@@ -169,6 +194,24 @@ export class ThreadView implements vscode.Disposable {
     this.drafts.delete(annotationId);
     reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.sync();
+  }
+
+  private async rescueLostEdit(entry: ThreadComment): Promise<void> {
+    const body = typeof entry.body === "string" ? entry.body : entry.body.value;
+    if (body.trim() === "" || body === entry.savedBody) {
+      return;
+    }
+    const rescued = await rescue(body);
+    void vscode.window.showWarningMessage(
+      withRescue("The comment you were editing was removed from the shared file.", rescued)
+    );
+  }
+
+  private closePending(): void {
+    for (const thread of this.pending.keys()) {
+      thread.dispose();
+    }
+    this.pending.clear();
   }
 
   private closeDrafts(except?: string): void {
@@ -188,10 +231,7 @@ export class ThreadView implements vscode.Disposable {
 
   discard(thread?: vscode.CommentThread): void {
     if (!thread) {
-      for (const entry of this.pending.keys()) {
-        entry.dispose();
-      }
-      this.pending.clear();
+      this.closePending();
       return;
     }
     if (this.pending.has(thread)) {
@@ -373,10 +413,7 @@ export class ThreadView implements vscode.Disposable {
     }
     if (this.pending.size > 0) {
       void vscode.window.showInformationMessage("Closed the note you had open.");
-      for (const entry of this.pending.keys()) {
-        entry.dispose();
-      }
-      this.pending.clear();
+      this.closePending();
     }
     const text = editor.document.getText();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
@@ -431,6 +468,7 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     this.closeDrafts(annotationId);
+    this.closePending();
     if (this.live.rangeFor(document, annotation).isEmpty) {
       void vscode.window.showWarningMessage(
         "That highlight lost its text. Remove it instead of commenting on it."
@@ -469,6 +507,10 @@ export class ThreadView implements vscode.Disposable {
     try {
       document = await vscode.workspace.openTextDocument(thread.uri);
     } catch {
+      const rescued = await rescue(comment.body);
+      void vscode.window.showWarningMessage(
+        withRescue("CodeLight could not open that file, so the comment was not saved.", rescued)
+      );
       return undefined;
     }
     const draft = this.pending.get(thread);
@@ -544,6 +586,11 @@ export class ThreadView implements vscode.Disposable {
     for (const entry of thread.comments) {
       if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
         editing.set(entry.commentId, entry);
+      }
+    }
+    for (const [id, entry] of editing) {
+      if (!annotation.comments.some((comment) => comment.id === id)) {
+        void this.rescueLostEdit(entry);
       }
     }
     thread.comments = annotation.comments.map((comment) => {
@@ -627,10 +674,7 @@ export class ThreadView implements vscode.Disposable {
     for (const thread of this.threads.values()) {
       thread.dispose();
     }
-    for (const thread of this.pending.keys()) {
-      thread.dispose();
-    }
-    this.pending.clear();
+    this.closePending();
     this.threads.clear();
     this.owners.clear();
     this.drafts.clear();
