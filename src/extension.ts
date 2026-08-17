@@ -6,6 +6,7 @@ import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
 import { MarkerMode } from "./marker";
+import { FileStatus } from "./statusbar";
 import { AnnotationStore } from "./store";
 import { Swatches } from "./swatches";
 import { ThreadComment, ThreadView } from "./threads";
@@ -18,6 +19,7 @@ export function activate(context: vscode.ExtensionContext): void {
   useSwatches(new Swatches(context.globalStorageUri));
   const highlights = new HighlightCommands(store, identity, renderer, live);
   const marker = new MarkerMode(store, renderer, highlights);
+  const status = new FileStatus(store);
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity);
   const tree = new AnnotationTree(store);
@@ -34,12 +36,20 @@ export function activate(context: vscode.ExtensionContext): void {
     live,
     renderer,
     marker,
+    status,
     vscode.commands.registerCommand("codelight.markerOn", async () => {
       await ready;
       await marker.toggle();
     }),
     vscode.commands.registerCommand("codelight.markerOff", () => {
       marker.off();
+    }),
+    vscode.commands.registerCommand("codelight.openWalkthrough", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.action.openWalkthrough",
+        `${context.extension.id}#codelight.start`,
+        false
+      );
     }),
     threads,
     tree,

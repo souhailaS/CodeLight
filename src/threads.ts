@@ -4,7 +4,7 @@ import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation, Comment, MAX_COMMENT_BODY } from "./model";
-import { readPalette } from "./palette";
+import { readGutterMode, readPalette } from "./palette";
 import { rescue, withRescue } from "./rescue";
 import { toRelativePath, toUri } from "./paths";
 import { AnnotationStore } from "./store";
@@ -68,7 +68,25 @@ export class ThreadView implements vscode.Disposable {
         if (!relative || document.lineCount === 0) {
           return [];
         }
-        return [new vscode.Range(0, 0, document.lineCount - 1, 0)];
+        const mode = readGutterMode(root);
+        if (mode === "off") {
+          return [];
+        }
+        if (mode === "always") {
+          return [new vscode.Range(0, 0, document.lineCount - 1, 0)];
+        }
+        const spans = this.live.spansFor(document);
+        const lines = new Set<number>();
+        for (const annotation of this.store.forFile(relative)) {
+          if (annotation.orphaned === true) {
+            continue;
+          }
+          const range = this.live.rangeFor(document, annotation, spans);
+          for (let line = range.start.line; line <= range.end.line; line += 1) {
+            lines.add(line);
+          }
+        }
+        return [...lines].sort((a, b) => a - b).map((line) => new vscode.Range(line, 0, line, 0));
       }
     };
     this.disposables.push(

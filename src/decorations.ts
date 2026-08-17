@@ -12,6 +12,7 @@ export class HighlightRenderer implements vscode.Disposable {
   private palette: PaletteColor[] = [];
   private paletteRoot: string | undefined;
   private badge: vscode.TextEditorDecorationType | undefined;
+  private gutters = new Map<string, vscode.TextEditorDecorationType>();
   private hovers = new Map<string, vscode.MarkdownString>();
   private inline: InlineMode = "preview";
 
@@ -64,6 +65,10 @@ export class HighlightRenderer implements vscode.Disposable {
       grouped.set(key, []);
     }
     const labels = new Map<number, string[]>();
+    const marks = new Map<string, vscode.Range[]>();
+    for (const key of this.types.keys()) {
+      marks.set(key, []);
+    }
     for (const annotation of annotations) {
       if (annotation.orphaned === true) {
         continue;
@@ -77,6 +82,10 @@ export class HighlightRenderer implements vscode.Disposable {
       }
       const range = this.live.rangeFor(editor.document, annotation, spans);
       options.push({ range, hoverMessage: this.hover(annotation) });
+      const gutter = marks.get(key);
+      if (gutter && !range.isEmpty) {
+        gutter.push(new vscode.Range(range.start.line, 0, range.start.line, 0));
+      }
       const label = range.isEmpty ? undefined : inlineLabel(annotation, this.inline);
       if (label !== undefined) {
         const anchorLine =
@@ -92,6 +101,12 @@ export class HighlightRenderer implements vscode.Disposable {
       const type = this.types.get(key);
       if (type) {
         editor.setDecorations(type, options);
+      }
+    }
+    for (const [key, ranges] of marks) {
+      const type = this.gutters.get(key);
+      if (type) {
+        editor.setDecorations(type, ranges);
       }
     }
     if (this.badge) {
@@ -130,7 +145,11 @@ export class HighlightRenderer implements vscode.Disposable {
     for (const type of this.types.values()) {
       type.dispose();
     }
+    for (const type of this.gutters.values()) {
+      type.dispose();
+    }
     this.types = new Map();
+    this.gutters = new Map();
     const resource = this.store.rootUri;
     this.paletteRoot = resource?.toString();
     this.palette = readPalette(resource);
@@ -157,14 +176,30 @@ export class HighlightRenderer implements vscode.Disposable {
           rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
         })
       );
+      this.gutters.set(
+        color.id,
+        vscode.window.createTextEditorDecorationType({
+          gutterIconPath: this.gutterIcon(color.hex),
+          gutterIconSize: "auto"
+        })
+      );
     }
+  }
+
+  private gutterIcon(hex: string): vscode.Uri {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><rect x="5" y="1.5" width="4" height="11" rx="2" fill="${hex}"/></svg>`;
+    return vscode.Uri.parse(`data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`);
   }
 
   dispose(): void {
     for (const type of this.types.values()) {
       type.dispose();
     }
+    for (const type of this.gutters.values()) {
+      type.dispose();
+    }
     this.types = new Map();
+    this.gutters = new Map();
     this.badge?.dispose();
     this.badge = undefined;
     for (const disposable of this.disposables) {

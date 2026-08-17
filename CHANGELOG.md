@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+Interface work, so the extension looks and behaves like the demo.
+
+* A marker button in the editor toolbar. Turn it on, pick a colour, and everything you select gets highlighted until you turn it off. The status bar shows the colour and turns it off with a click.
+* Custom CodeLight icons in the toolbar rather than borrowed built in ones, so they are not mistaken for VS Code's own buttons.
+* A coloured mark in the gutter for every highlight, so you can see where your notes are while scrolling.
+* Real colour swatches in the picker, including palettes you define yourself.
+* A status bar count of the highlights and comments in the file you are reading.
+* A walkthrough on install, and welcome content in the panel when a project has no notes yet.
+* The comment button in the gutter now appears only on lines that already have a highlight, with a setting to put it everywhere or nowhere.
+
 ## 0.2.1
 
 * Refuse to place a note when the file changed and its text cannot be found again, instead of attaching it to whatever moved into those coordinates.

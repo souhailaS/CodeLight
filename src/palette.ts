@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import { InlineMode } from "./thread";
 
+export type GutterMode = "always" | "highlights" | "off";
+
 export interface PaletteColor {
   id: string;
   label: string;
@@ -72,6 +74,11 @@ export function readInlineMode(resource?: vscode.Uri): InlineMode {
   return configured === "off" || configured === "count" || configured === "preview"
     ? configured
     : "preview";
+}
+
+export function readGutterMode(resource?: vscode.Uri): GutterMode {
+  const configured = configuration(resource).get<unknown>("commentGutter");
+  return configured === "always" || configured === "off" ? configured : "highlights";
 }
 
 export function resolveColor(palette: readonly PaletteColor[], id: string): PaletteColor {
