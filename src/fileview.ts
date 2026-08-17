@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { LiveRanges } from "./live";
 import { Comment } from "./model";
 import { readPalette } from "./palette";
+import { basename } from "./panel";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { formatDate, snippet } from "./thread";
@@ -16,6 +17,11 @@ interface Card {
   line: number;
   orphaned: boolean;
   comments: Comment[];
+}
+
+interface FileCards {
+  file: string;
+  cards: Card[];
 }
 
 function escapeHtml(value: string): string {
@@ -37,6 +43,8 @@ function styles(): string {
     "  color: var(--vscode-foreground); font-family: var(--vscode-font-family);",
     "  font-size: var(--vscode-font-size); }",
     ".empty { color: var(--vscode-descriptionForeground); }",
+    ".file { margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis;",
+    "  white-space: nowrap; color: var(--vscode-descriptionForeground); }",
     ".card { border: 1px solid var(--vscode-panel-border); border-radius: 4px;",
     "  padding: 6px 8px; margin-bottom: 6px; cursor: pointer; }",
     ".card:hover { background: var(--vscode-list-hoverBackground); }",
@@ -60,11 +68,14 @@ function styles(): string {
 function script(): string {
   return [
     "const bridge = acquireVsCodeApi();",
+    "const key = document.body.dataset.key;",
     "const saved = bridge.getState();",
-    "if (saved && typeof saved.scroll === 'number') {",
+    "if (saved && saved.key === key && typeof saved.scroll === 'number') {",
     "  window.scrollTo(0, saved.scroll);",
     "}",
-    "window.addEventListener('scroll', () => bridge.setState({ scroll: window.scrollY }));",
+    "window.addEventListener('scroll', () => {",
+    "  bridge.setState({ key: key, scroll: window.scrollY });",
+    "});",
     "for (const card of document.querySelectorAll('.card')) {",
     "  const send = () => bridge.postMessage({ type: 'reveal', id: card.dataset.id });",
     "  card.addEventListener('click', send);",
@@ -76,6 +87,14 @@ function script(): string {
     "  });",
     "}"
   ].join("\n");
+}
+
+function renderNote(text: string): string {
+  return `<p class="empty">${escapeHtml(text)}</p>`;
+}
+
+function renderHeader(file: string): string {
+  return `<div class="file" title="${escapeHtml(file)}">${escapeHtml(basename(file))}</div>`;
 }
 
 function renderComment(comment: Comment): string {
@@ -150,6 +169,10 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     this.render();
   }
 
+  refresh(): void {
+    this.render();
+  }
+
   private unbind(): void {
     this.view = undefined;
     this.shown = undefined;
@@ -210,7 +233,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     return this.tracked;
   }
 
-  private cards(editor: vscode.TextEditor | undefined): Card[] | undefined {
+  private collect(editor: vscode.TextEditor | undefined): FileCards | undefined {
     const root = this.store.rootUri;
     if (!editor || !root) {
       return undefined;
@@ -225,7 +248,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       .forFile(relative)
       .filter((annotation) => annotation.comments.length > 0);
     const spans = annotations.length > 0 ? this.live.spansFor(document) : undefined;
-    return annotations
+    const cards = annotations
       .map((annotation) => ({
         annotation,
         range: this.live.rangeFor(document, annotation, spans)
@@ -239,21 +262,27 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
         orphaned: annotation.orphaned === true,
         comments: annotation.comments
       }));
+    return { file: relative, cards };
   }
 
   private body(editor: vscode.TextEditor | undefined): string {
-    const cards = this.cards(editor);
-    if (cards === undefined) {
-      return `<p class="empty">Open a file from this workspace to see its comments.</p>`;
+    if (this.store.all.length === 0) {
+      return renderNote("This project has no CodeLight annotations yet.");
     }
-    if (cards.length === 0) {
-      return `<p class="empty">No comments in this file yet.</p>`;
+    const found = this.collect(editor);
+    if (!found) {
+      return renderNote("Open a file from this workspace to see its comments.");
     }
-    return cards.map(renderCard).join("");
+    const header = renderHeader(found.file);
+    if (found.cards.length === 0) {
+      return `${header}${renderNote("No comments in this file yet.")}`;
+    }
+    return header + found.cards.map(renderCard).join("");
   }
 
   private html(webview: vscode.Webview, editor: vscode.TextEditor | undefined): string {
     const nonce = this.nonce;
+    const key = editor ? editor.document.uri.toString() : "";
     const policy = [
       "default-src 'none'",
       `style-src ${webview.cspSource} 'unsafe-inline'`,
@@ -269,7 +298,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       `<style>${styles()}</style>`,
       `<title>This File</title>`,
       `</head>`,
-      `<body>`,
+      `<body data-key="${escapeHtml(key)}">`,
       this.body(editor),
       `<script nonce="${nonce}">${script()}</script>`,
       `</body>`,

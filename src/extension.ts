@@ -25,6 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const fileComments = new FileCommentsView(store, live);
   const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
+  void ready.then(() => fileComments.refresh());
 
   context.subscriptions.push(
     identity,
