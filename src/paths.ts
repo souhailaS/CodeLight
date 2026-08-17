@@ -23,16 +23,19 @@ export function isMissingFile(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
 }
 
-export async function exists(target: vscode.Uri): Promise<boolean> {
+export async function statFile(target: vscode.Uri): Promise<vscode.FileStat | undefined> {
   try {
-    await vscode.workspace.fs.stat(target);
-    return true;
+    return await vscode.workspace.fs.stat(target);
   } catch (error) {
     if (isMissingFile(error)) {
-      return false;
+      return undefined;
     }
     throw error;
   }
+}
+
+export async function exists(target: vscode.Uri): Promise<boolean> {
+  return (await statFile(target)) !== undefined;
 }
 
 async function hasStore(root: vscode.Uri): Promise<boolean> {

@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import { newId } from "./ids";
 import { Annotation, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
-import { exists, isMissingFile, resolveRoot, STORE_PATTERN, storeUri } from "./paths";
+import { exists, isMissingFile, resolveRoot, statFile, STORE_PATTERN, storeUri } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
 const MAX_STORE_BYTES = 64 * 1024 * 1024;
@@ -38,7 +38,14 @@ type Choice =
   | { status: "ok"; target: vscode.Uri; duplicate: Duplicate }
   | { status: "error"; message: string };
 
-type Presence = { status: "ok"; present: boolean } | { status: "error"; message: string };
+type Presence =
+  | { status: "ok"; present: boolean; mtime: number }
+  | { status: "error"; message: string };
+
+interface State {
+  present: boolean;
+  mtime: number;
+}
 
 interface Outcome {
   target: vscode.Uri;
@@ -48,6 +55,14 @@ interface Outcome {
 interface TargetInfo {
   shared: boolean;
   mode: number;
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  if (error instanceof vscode.FileSystemError) {
+    return error.code === "NoPermissions";
+  }
+  const code = typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
+  return code === "EACCES" || code === "EPERM" || code === "EROFS";
 }
 
 function describe(error: unknown): string {
@@ -229,6 +244,13 @@ export class AnnotationStore implements vscode.Disposable {
       void vscode.window.showInformationMessage("CodeLight has no annotation file to convert yet.");
       return false;
     }
+    const info = await inspectTarget(source);
+    if (info?.shared) {
+      void vscode.window.showWarningMessage(
+        `CodeLight left ${source.fsPath} alone because it is a symlink or has another name pointing at it. Converting it would leave that other name behind.`
+      );
+      return false;
+    }
     const destination = isCompressed(source) ? files.plain : files.compressed;
     const question = isCompressed(destination)
       ? `Convert ${source.fsPath} into ${destination.fsPath}? The compressed file is much smaller, but git cannot diff or merge it.`
@@ -329,14 +351,15 @@ export class AnnotationStore implements vscode.Disposable {
 
   private async inspect(target: vscode.Uri): Promise<Presence> {
     try {
-      return { status: "ok", present: await exists(target) };
+      const stat = await statFile(target);
+      return { status: "ok", present: stat !== undefined, mtime: stat ? stat.mtime : 0 };
     } catch (error) {
       return { status: "error", message: `CodeLight could not check ${target.fsPath}. ${describe(error)}` };
     }
   }
 
-  private resolve(files: StoreFiles, hasPlain: boolean, hasCompressed: boolean): Outcome {
-    if (hasPlain && hasCompressed) {
+  private resolve(files: StoreFiles, plain: State, compressed: State): Outcome {
+    if (plain.present && compressed.present) {
       const active = this.active?.toString();
       if (active === files.plain.toString()) {
         return { target: files.plain, duplicate: true };
@@ -344,26 +367,38 @@ export class AnnotationStore implements vscode.Disposable {
       if (active === files.compressed.toString()) {
         return { target: files.compressed, duplicate: true };
       }
-      return { target: files.fresh, duplicate: true };
+      if (plain.mtime > compressed.mtime) {
+        return { target: files.plain, duplicate: true };
+      }
+      return { target: files.compressed, duplicate: true };
     }
-    if (hasCompressed) {
+    if (compressed.present) {
       return { target: files.compressed, duplicate: false };
     }
-    if (hasPlain) {
+    if (plain.present) {
       return { target: files.plain, duplicate: false };
     }
     return { target: this.active ?? files.fresh, duplicate: false };
   }
 
+  private states(presence: Presence): State[] {
+    if (presence.status === "ok") {
+      return [{ present: presence.present, mtime: presence.mtime }];
+    }
+    return [
+      { present: false, mtime: 0 },
+      { present: true, mtime: Number.NEGATIVE_INFINITY },
+      { present: true, mtime: Number.POSITIVE_INFINITY }
+    ];
+  }
+
   private async pick(files: StoreFiles): Promise<Choice> {
     const plain = await this.inspect(files.plain);
     const compressed = await this.inspect(files.compressed);
-    const plainStates = plain.status === "ok" ? [plain.present] : [true, false];
-    const compressedStates = compressed.status === "ok" ? [compressed.present] : [true, false];
     const outcomes: Outcome[] = [];
-    for (const hasPlain of plainStates) {
-      for (const hasCompressed of compressedStates) {
-        outcomes.push(this.resolve(files, hasPlain, hasCompressed));
+    for (const plainState of this.states(plain)) {
+      for (const compressedState of this.states(compressed)) {
+        outcomes.push(this.resolve(files, plainState, compressedState));
       }
     }
     const first = outcomes[0];
@@ -570,6 +605,15 @@ export class AnnotationStore implements vscode.Disposable {
     const temporary = vscode.Uri.joinPath(folder, temporaryName());
     try {
       await vscode.workspace.fs.writeFile(temporary, bytes);
+    } catch (error) {
+      if (!isPermissionDenied(error)) {
+        await this.cleanup(temporary);
+        throw error;
+      }
+      await vscode.workspace.fs.writeFile(target, bytes);
+      return;
+    }
+    try {
       if (existing) {
         await chmod(temporary.fsPath, existing.mode);
       }
