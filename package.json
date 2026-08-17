@@ -50,8 +50,8 @@
     "keybindings": [
       {
         "command": "codelight.addHighlight",
-        "key": "ctrl+alt+h",
-        "mac": "cmd+alt+h",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
         "when": "editorTextFocus"
       }
     ],

@@ -8,6 +8,7 @@ export type SpanMap = Map<string, Span>;
 
 export class LiveRanges implements vscode.Disposable {
   private readonly documents = new Map<string, SpanMap>();
+  private readonly flushing = new Set<string>();
   private readonly disposables: vscode.Disposable[] = [];
   private readonly changeEmitter = new vscode.EventEmitter<vscode.TextDocument>();
 
@@ -64,6 +65,9 @@ export class LiveRanges implements vscode.Disposable {
       if (!span) {
         continue;
       }
+      if (span.start === span.end) {
+        continue;
+      }
       const current = this.spanOf(document, annotation);
       if (current.start === span.start && current.end === span.end) {
         continue;
@@ -76,6 +80,18 @@ export class LiveRanges implements vscode.Disposable {
     if (moved.size === 0) {
       return;
     }
+    const key = document.uri.toString();
+    this.flushing.add(key);
+    try {
+      await this.persistMoved(moved);
+    } finally {
+      this.flushing.delete(key);
+    }
+  }
+
+  private async persistMoved(
+    moved: Map<string, { start: vscode.Position; end: vscode.Position }>
+  ): Promise<void> {
     await this.store.transaction((annotations) => {
       let changed = false;
       for (const [id, position] of moved) {
@@ -112,7 +128,7 @@ export class LiveRanges implements vscode.Disposable {
   private sync(document: vscode.TextDocument, stored: readonly Annotation[]): SpanMap {
     const key = document.uri.toString();
     const existing = this.documents.get(key);
-    if (!existing || !document.isDirty) {
+    if (!existing || (!document.isDirty && !this.flushing.has(key))) {
       const fresh: SpanMap = new Map();
       for (const annotation of stored) {
         fresh.set(annotation.id, this.spanOf(document, annotation));

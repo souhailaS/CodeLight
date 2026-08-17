@@ -72,14 +72,23 @@ export class HighlightCommands {
     const root = this.store.rootUri;
     const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
     if (!relative) {
-      void vscode.window.showWarningMessage("CodeLight only tracks files inside the workspace folder.");
+      const folder = root ? root.path.split("/").pop() : undefined;
+      void vscode.window.showWarningMessage(
+        folder
+          ? `CodeLight is tracking the folder ${folder} and cannot annotate files outside it.`
+          : "CodeLight needs an open folder."
+      );
       return undefined;
     }
     const range = editor.selection.isEmpty
       ? editor.document.lineAt(editor.selection.active.line).range
       : new vscode.Range(editor.selection.start, editor.selection.end);
     if (range.isEmpty) {
-      void vscode.window.showWarningMessage("Select some text to highlight.");
+      void vscode.window.showWarningMessage(
+        editor.selection.isEmpty
+          ? "This line is empty. Select some text to highlight."
+          : "Select some text to highlight."
+      );
       return undefined;
     }
     const anchor = buildAnchor(editor.document, range);
@@ -118,9 +127,6 @@ export class HighlightCommands {
       void vscode.window.showWarningMessage("CodeLight could not save the highlight.");
       return undefined;
     }
-    if (editor.document.isDirty) {
-      await this.live.flushDocument(editor.document);
-    }
     return annotation;
   }
 
@@ -136,10 +142,9 @@ export class HighlightCommands {
     }
     const position = editor.selection.active;
     const spans = this.live.spansFor(editor.document);
-    return this.store.forFile(relative).filter((annotation) => {
-      const range = this.live.rangeFor(editor.document, annotation, spans);
-      return range.isEmpty ? range.start.line === position.line : range.contains(position);
-    });
+    return this.store
+      .forFile(relative)
+      .filter((annotation) => this.live.rangeFor(editor.document, annotation, spans).contains(position));
   }
 
   async pickAtCursor(title: string): Promise<Annotation | undefined> {
