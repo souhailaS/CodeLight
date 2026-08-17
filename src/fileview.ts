@@ -7,11 +7,14 @@ import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { formatDate, snippet } from "./thread";
 
+const SHIFT_DEBOUNCE_MS = 250;
+
 interface Card {
   id: string;
   hex: string | undefined;
   label: string;
   line: number;
+  orphaned: boolean;
   comments: Comment[];
 }
 
@@ -30,7 +33,7 @@ function createNonce(): string {
 
 function styles(): string {
   return [
-    "body { margin: 0; padding: 8px; background: var(--vscode-editor-background);",
+    "body { margin: 0; padding: 8px; background: var(--vscode-sideBar-background);",
     "  color: var(--vscode-foreground); font-family: var(--vscode-font-family);",
     "  font-size: var(--vscode-font-size); }",
     ".empty { color: var(--vscode-descriptionForeground); }",
@@ -43,6 +46,9 @@ function styles(): string {
     "  background: var(--vscode-descriptionForeground); }",
     ".snippet { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;",
     "  white-space: nowrap; color: var(--vscode-textLink-foreground); }",
+    ".orphan .snippet { color: var(--vscode-descriptionForeground);",
+    "  text-decoration: line-through; }",
+    ".orphan .body { color: var(--vscode-descriptionForeground); }",
     ".line { flex: none; font-size: 0.85em; color: var(--vscode-descriptionForeground); }",
     ".comment { margin-top: 6px; }",
     ".comment + .comment { padding-top: 6px; border-top: 1px solid var(--vscode-panel-border); }",
@@ -54,6 +60,11 @@ function styles(): string {
 function script(): string {
   return [
     "const bridge = acquireVsCodeApi();",
+    "const saved = bridge.getState();",
+    "if (saved && typeof saved.scroll === 'number') {",
+    "  window.scrollTo(0, saved.scroll);",
+    "}",
+    "window.addEventListener('scroll', () => bridge.setState({ scroll: window.scrollY }));",
     "for (const card of document.querySelectorAll('.card')) {",
     "  const send = () => bridge.postMessage({ type: 'reveal', id: card.dataset.id });",
     "  card.addEventListener('click', send);",
@@ -81,15 +92,17 @@ function renderComment(comment: Comment): string {
 
 function renderCard(card: Card): string {
   const dot =
-    card.hex === undefined
+    card.hex === undefined || card.orphaned
       ? `<span class="dot"></span>`
       : `<span class="dot" style="background: ${escapeHtml(card.hex)}"></span>`;
+  const classes = card.orphaned ? "card orphan" : "card";
+  const note = card.orphaned ? "text deleted" : `Line ${card.line}`;
   return [
-    `<div class="card" role="button" tabindex="0" data-id="${escapeHtml(card.id)}">`,
+    `<div class="${classes}" role="button" tabindex="0" data-id="${escapeHtml(card.id)}">`,
     `<div class="head">`,
     dot,
     `<span class="snippet">${escapeHtml(card.label)}</span>`,
-    `<span class="line">Line ${card.line}</span>`,
+    `<span class="line">${note}</span>`,
     `</div>`,
     card.comments.map(renderComment).join(""),
     `</div>`
@@ -102,6 +115,10 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   private readonly disposables: vscode.Disposable[] = [];
   private bound: vscode.Disposable[] = [];
   private view: vscode.WebviewView | undefined;
+  private nonce = createNonce();
+  private tracked: vscode.TextEditor | undefined;
+  private shown: string | undefined;
+  private shiftTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly store: AnnotationStore,
@@ -109,13 +126,21 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   ) {
     this.disposables.push(
       store.onDidChange(() => this.render()),
-      vscode.window.onDidChangeActiveTextEditor(() => this.render())
+      live.onDidShift((document) => this.scheduleShift(document)),
+      vscode.window.onDidChangeActiveTextEditor(() => this.render()),
+      vscode.window.onDidChangeVisibleTextEditors(() => this.render()),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("codelight.palette")) {
+          this.render();
+        }
+      })
     );
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.unbind();
     this.view = view;
+    this.nonce = createNonce();
     view.webview.options = { enableScripts: true, localResourceRoots: [] };
     this.bound.push(
       view.webview.onDidReceiveMessage((message: unknown) => this.receive(message)),
@@ -127,10 +152,25 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
 
   private unbind(): void {
     this.view = undefined;
+    this.shown = undefined;
     for (const disposable of this.bound) {
       disposable.dispose();
     }
     this.bound = [];
+  }
+
+  private scheduleShift(document: vscode.TextDocument): void {
+    const view = this.view;
+    if (!view || !view.visible || this.shown !== document.uri.toString()) {
+      return;
+    }
+    if (this.shiftTimer) {
+      clearTimeout(this.shiftTimer);
+    }
+    this.shiftTimer = setTimeout(() => {
+      this.shiftTimer = undefined;
+      this.render();
+    }, SHIFT_DEBOUNCE_MS);
   }
 
   private receive(message: unknown): void {
@@ -149,11 +189,28 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     if (!view || !view.visible) {
       return;
     }
-    view.webview.html = this.html(view.webview);
+    const editor = this.editor();
+    this.shown = editor ? editor.document.uri.toString() : undefined;
+    view.webview.html = this.html(view.webview, editor);
   }
 
-  private cards(): Card[] | undefined {
-    const editor = vscode.window.activeTextEditor;
+  private editor(): vscode.TextEditor | undefined {
+    const active = vscode.window.activeTextEditor;
+    if (active) {
+      this.tracked = active;
+      return active;
+    }
+    const previous = this.tracked?.document.uri.toString();
+    const still = previous
+      ? vscode.window.visibleTextEditors.find(
+          (candidate) => candidate.document.uri.toString() === previous
+        )
+      : undefined;
+    this.tracked = still ?? vscode.window.visibleTextEditors[0];
+    return this.tracked;
+  }
+
+  private cards(editor: vscode.TextEditor | undefined): Card[] | undefined {
     const root = this.store.rootUri;
     if (!editor || !root) {
       return undefined;
@@ -166,7 +223,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     const palette = readPalette(root);
     const annotations = this.store
       .forFile(relative)
-      .filter((annotation) => annotation.orphaned !== true && annotation.comments.length > 0);
+      .filter((annotation) => annotation.comments.length > 0);
     const spans = annotations.length > 0 ? this.live.spansFor(document) : undefined;
     return annotations
       .map((annotation) => ({
@@ -179,12 +236,13 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
         hex: palette.find((color) => color.id === annotation.color)?.hex,
         label: snippet(annotation),
         line: range.start.line + 1,
+        orphaned: annotation.orphaned === true,
         comments: annotation.comments
       }));
   }
 
-  private body(): string {
-    const cards = this.cards();
+  private body(editor: vscode.TextEditor | undefined): string {
+    const cards = this.cards(editor);
     if (cards === undefined) {
       return `<p class="empty">Open a file from this workspace to see its comments.</p>`;
     }
@@ -194,8 +252,8 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     return cards.map(renderCard).join("");
   }
 
-  private html(webview: vscode.Webview): string {
-    const nonce = createNonce();
+  private html(webview: vscode.Webview, editor: vscode.TextEditor | undefined): string {
+    const nonce = this.nonce;
     const policy = [
       "default-src 'none'",
       `style-src ${webview.cspSource} 'unsafe-inline'`,
@@ -212,7 +270,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       `<title>This File</title>`,
       `</head>`,
       `<body>`,
-      this.body(),
+      this.body(editor),
       `<script nonce="${nonce}">${script()}</script>`,
       `</body>`,
       `</html>`
@@ -220,6 +278,10 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   dispose(): void {
+    if (this.shiftTimer) {
+      clearTimeout(this.shiftTimer);
+      this.shiftTimer = undefined;
+    }
     this.unbind();
     for (const disposable of this.disposables) {
       disposable.dispose();
