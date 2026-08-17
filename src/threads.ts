@@ -141,7 +141,8 @@ export class ThreadView implements vscode.Disposable {
         return;
       }
     }
-    const annotationId = owned ?? (await this.createAnnotation(reply.thread, comment));
+    const annotationId =
+      owned ?? (await this.createAnnotation(reply.thread, comment, comment.author));
     if (annotationId === undefined) {
       return;
     }
@@ -418,7 +419,7 @@ export class ThreadView implements vscode.Disposable {
     const text = editor.document.getText();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
     thread.label = "New CodeLight note";
-    thread.contextValue = "codelight";
+    thread.contextValue = "draft";
     thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.pending.set(thread, {
       anchor: buildAnchor(
@@ -491,9 +492,54 @@ export class ThreadView implements vscode.Disposable {
     await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
   }
 
+  async highlightOnly(thread?: vscode.CommentThread): Promise<void> {
+    if (!thread || !this.pending.has(thread)) {
+      return;
+    }
+    const author = await this.identity.require();
+    if (!author) {
+      return;
+    }
+    await this.createAnnotation(thread, undefined, { login: author.login, id: author.id });
+  }
+
+  async deleteHighlight(thread?: vscode.CommentThread): Promise<void> {
+    if (!thread) {
+      return;
+    }
+    const id = this.owners.get(thread);
+    if (id === undefined) {
+      return;
+    }
+    const annotation = this.store.byId(id);
+    if (!annotation) {
+      return;
+    }
+    const count = annotation.comments.length;
+    if (count > 0) {
+      const confirmed = await vscode.window.showWarningMessage(
+        `Remove this highlight and its ${count} comment${count === 1 ? "" : "s"}?`,
+        { modal: true },
+        "Remove"
+      );
+      if (confirmed !== "Remove") {
+        return;
+      }
+    }
+    if (!(await this.store.remove(id))) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      return;
+    }
+    this.drafts.delete(id);
+    this.owners.delete(thread);
+    this.threads.delete(id);
+    thread.dispose();
+  }
+
   private async createAnnotation(
     thread: vscode.CommentThread,
-    comment: Comment
+    comment: Comment | undefined,
+    author: Comment["author"]
   ): Promise<string | undefined> {
     const root = this.store.rootUri;
     const relative = root ? toRelativePath(root, thread.uri) : undefined;
@@ -507,9 +553,9 @@ export class ThreadView implements vscode.Disposable {
     try {
       document = await vscode.workspace.openTextDocument(thread.uri);
     } catch {
-      const rescued = await rescue(comment.body);
+      const rescued = comment ? await rescue(comment.body) : false;
       void vscode.window.showWarningMessage(
-        withRescue("CodeLight could not open that file, so the comment was not saved.", rescued)
+        withRescue("CodeLight could not open that file, so nothing was saved.", rescued)
       );
       return undefined;
     }
@@ -519,7 +565,7 @@ export class ThreadView implements vscode.Disposable {
     if (draft && document.version !== draft.version) {
       const found = findAnchor(document.getText(), draft.anchor);
       if (!found) {
-        const rescued = await rescue(comment.body);
+        const rescued = comment ? await rescue(comment.body) : false;
         void vscode.window.showWarningMessage(
           withRescue("The file changed and the selection could not be found again.", rescued)
         );
@@ -548,15 +594,18 @@ export class ThreadView implements vscode.Disposable {
       },
       anchor: buildAnchor(text, document.offsetAt(range.start), document.offsetAt(range.end)),
       color: readPalette(root)[0].id,
-      author: comment.author,
+      author,
       createdAt: now,
       updatedAt: now,
-      comments: [comment]
+      comments: comment ? [comment] : []
     };
     if (!(await this.store.add(annotation))) {
-      const rescued = await rescue(comment.body);
+      const rescued = comment ? await rescue(comment.body) : false;
       void vscode.window.showWarningMessage(
-        withRescue("CodeLight could not save the comment.", rescued)
+        withRescue(
+          comment ? "CodeLight could not save the comment." : "CodeLight could not save the highlight.",
+          rescued
+        )
       );
       return undefined;
     }
@@ -572,7 +621,7 @@ export class ThreadView implements vscode.Disposable {
     const range = this.live.rangeFor(document, annotation);
     const thread = this.controller.createCommentThread(document.uri, range, []);
     thread.label = `CodeLight, highlighted by ${annotation.author.login}`;
-    thread.contextValue = "codelight";
+    thread.contextValue = "saved";
     thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
     this.threads.set(annotation.id, thread);
     this.owners.set(thread, annotation.id);

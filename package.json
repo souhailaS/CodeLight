@@ -145,6 +145,18 @@
         "title": "Close",
         "category": "CodeLight",
         "icon": "$(close)"
+      },
+      {
+        "command": "codelight.threadHighlightOnly",
+        "title": "Highlight Without Comment",
+        "category": "CodeLight",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "codelight.threadDeleteHighlight",
+        "title": "Delete Highlight",
+        "category": "CodeLight",
+        "icon": "$(trash)"
       }
     ],
     "keybindings": [
@@ -205,6 +217,14 @@
         },
         {
           "command": "codelight.threadDiscard",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadHighlightOnly",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadDeleteHighlight",
           "when": "false"
         }
       ],
@@ -299,8 +319,18 @@
       ],
       "comments/commentThread/title": [
         {
-          "command": "codelight.threadDiscard",
+          "command": "codelight.threadHighlightOnly",
           "group": "inline@1",
+          "when": "commentController == codelight && commentThread == draft"
+        },
+        {
+          "command": "codelight.threadDeleteHighlight",
+          "group": "inline@2",
+          "when": "commentController == codelight && commentThread == saved"
+        },
+        {
+          "command": "codelight.threadDiscard",
+          "group": "inline@3",
           "when": "commentController == codelight"
         }
       ]
