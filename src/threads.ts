@@ -96,7 +96,7 @@ export class ThreadView implements vscode.Disposable {
         if (!relative || document.lineCount === 0) {
           return [];
         }
-        const mode = readGutterMode(root);
+        const mode = readGutterMode(document.uri);
         if (mode === "off" || !this.visibility.visible) {
           return [];
         }
@@ -173,8 +173,9 @@ export class ThreadView implements vscode.Disposable {
       createdAt: now,
       updatedAt: now
     };
-    if (owned !== undefined) {
-      const annotation = this.store.byId(owned);
+    const adopted = owned ?? this.annotationAt(reply.thread);
+    if (adopted !== undefined) {
+      const annotation = this.store.byId(adopted);
       const document = vscode.workspace.textDocuments.find(
         (entry) => entry.uri.toString() === reply.thread.uri.toString()
       );
@@ -191,11 +192,11 @@ export class ThreadView implements vscode.Disposable {
       }
     }
     const annotationId =
-      owned ?? (await this.createAnnotation(reply.thread, comment, comment.author));
+      adopted ?? (await this.createAnnotation(reply.thread, comment, comment.author));
     if (annotationId === undefined) {
       return;
     }
-    if (owned === undefined) {
+    if (owned === undefined && adopted === undefined) {
       this.drafts.delete(annotationId);
       const created = this.threads.get(annotationId);
       if (created) {
@@ -642,6 +643,32 @@ export class ThreadView implements vscode.Disposable {
     this.drafts.delete(id);
   }
 
+  private annotationAt(thread: vscode.CommentThread): string | undefined {
+    const root = this.store.rootUri;
+    const relative = root ? toRelativePath(root, thread.uri) : undefined;
+    const range = thread.range;
+    if (!relative || !range) {
+      return undefined;
+    }
+    const document = vscode.workspace.textDocuments.find(
+      (entry) => entry.uri.toString() === thread.uri.toString()
+    );
+    if (!document) {
+      return undefined;
+    }
+    const spans = this.live.spansFor(document);
+    for (const annotation of this.store.forFile(relative)) {
+      if (annotation.orphaned === true) {
+        continue;
+      }
+      const live = this.live.rangeFor(document, annotation, spans);
+      if (!live.isEmpty && live.start.line <= range.start.line && range.start.line <= live.end.line) {
+        return annotation.id;
+      }
+    }
+    return undefined;
+  }
+
   private async createAnnotation(
     thread: vscode.CommentThread,
     comment: Comment | undefined,
@@ -798,7 +825,7 @@ export class ThreadView implements vscode.Disposable {
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
         const gone = this.store.byId(id) === undefined;
-        if (gone || hidden) {
+        if (gone) {
           for (const entry of thread.comments) {
             if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
               void this.rescueLostEdit(entry);

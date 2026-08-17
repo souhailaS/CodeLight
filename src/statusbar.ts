@@ -30,7 +30,9 @@ export class FileStatus implements vscode.Disposable {
       this.item.hide();
       return;
     }
-    const annotations = this.store.forFile(relative);
+    const annotations = this.store
+      .forFile(relative)
+      .filter((annotation) => annotation.orphaned !== true);
     if (annotations.length === 0) {
       this.item.hide();
       return;

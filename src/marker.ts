@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { HighlightRenderer } from "./decorations";
 import { HighlightCommands, pickColor } from "./highlights";
+import { LiveRanges } from "./live";
 import { PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
@@ -19,12 +20,14 @@ export class MarkerMode implements vscode.Disposable {
   private color: PaletteColor | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private busy = false;
+  private misses = 0;
   private last: Marked | undefined;
 
   constructor(
     private readonly store: AnnotationStore,
     private readonly renderer: HighlightRenderer,
-    private readonly highlights: HighlightCommands
+    private readonly highlights: HighlightCommands,
+    private readonly live: LiveRanges
   ) {
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.status.command = "codelight.markerOff";
@@ -54,6 +57,7 @@ export class MarkerMode implements vscode.Disposable {
     }
     this.color = picked;
     this.last = undefined;
+    this.misses = 0;
     this.status.text = `$(edit) Marker ${picked.label}`;
     this.status.tooltip = "CodeLight marker is on. Select text to highlight it. Click to turn off.";
     this.status.show();
@@ -119,10 +123,16 @@ export class MarkerMode implements vscode.Disposable {
     try {
       const created = await this.highlights.add(color, ranges, editor);
       if (created.length === 0) {
-        this.off();
-        void vscode.window.showInformationMessage("CodeLight turned the marker off.");
+        this.misses += 1;
+        if (this.misses >= 3) {
+          this.off();
+          void vscode.window.showInformationMessage(
+            "CodeLight turned the marker off after three highlights could not be saved."
+          );
+        }
         return;
       }
+      this.misses = 0;
       await this.dropPrevious(previous, editor, ranges);
       this.last = {
         id: created[0].id,
@@ -146,8 +156,12 @@ export class MarkerMode implements vscode.Disposable {
     if (previous.uri !== editor.document.uri.toString()) {
       return;
     }
-    const overlap = ranges[0].intersection(previous.range);
-    if (!overlap || !this.store.byId(previous.id)) {
+    const annotation = this.store.byId(previous.id);
+    if (!annotation) {
+      return;
+    }
+    const live = this.live.rangeFor(editor.document, annotation);
+    if (live.isEmpty || !ranges[0].intersection(live)) {
       return;
     }
     await this.store.remove(previous.id);
