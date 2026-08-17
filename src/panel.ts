@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { LiveRanges } from "./live";
 import { Annotation, Comment } from "./model";
-import { DEFAULT_PALETTE, PaletteColor } from "./palette";
+import { DEFAULT_PALETTE, PaletteColor, readPalette } from "./palette";
 import { toUri } from "./paths";
 import { AnnotationStore } from "./store";
 import { snippet } from "./thread";
@@ -36,11 +36,24 @@ function directory(file: string): string {
   return parts.join("/");
 }
 
-function colorIcon(color: string): vscode.ThemeIcon {
-  const known = DEFAULT_PALETTE.some((entry) => entry.id === color);
+function colorIcon(color: string, palette: readonly PaletteColor[]): vscode.ThemeIcon {
+  const configured = palette.find((entry) => entry.id === color);
+  const known = DEFAULT_PALETTE.some(
+    (entry) =>
+      entry.id === color &&
+      (configured === undefined || entry.hex.toLowerCase() === configured.hex.toLowerCase())
+  );
   return known
     ? new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor(`codelight.${color}`))
     : new vscode.ThemeIcon("circle-filled");
+}
+
+function trim(value: string, limit: number): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text === "") {
+    return "empty comment";
+  }
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
 }
 
 function countLabel(count: number, noun: string): string {
@@ -117,7 +130,9 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       item.description = parts.join(", ");
       item.contextValue = annotation.orphaned === true ? "codelight.orphan" : "codelight.annotation";
       item.iconPath =
-        annotation.orphaned === true ? new vscode.ThemeIcon("circle-slash") : colorIcon(annotation.color);
+        annotation.orphaned === true
+          ? new vscode.ThemeIcon("circle-slash")
+          : colorIcon(annotation.color, readPalette(this.store.rootUri));
       item.id = `annotation:${annotation.id}`;
       item.tooltip = annotation.anchor.text;
       item.command = {
@@ -127,10 +142,7 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       };
       return item;
     }
-    const item = new vscode.TreeItem(
-      node.comment.body.replace(/\s+/g, " ").trim(),
-      vscode.TreeItemCollapsibleState.None
-    );
+    const item = new vscode.TreeItem(trim(node.comment.body, 80), vscode.TreeItemCollapsibleState.None);
     item.description = `@${node.comment.author.login}`;
     item.iconPath = new vscode.ThemeIcon("comment");
     item.contextValue = "codelight.comment";
@@ -211,10 +223,14 @@ export class PanelCommands {
       void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
       return;
     }
-    const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
-    const range = this.live.rangeFor(document, annotation);
-    editor.selection = new vscode.Selection(range.start, range.end);
-    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    try {
+      const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+      const range = this.live.rangeFor(document, annotation);
+      editor.selection = new vscode.Selection(range.start, range.end);
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    } catch {
+      void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
+    }
   }
 
   async deleteAnnotation(node?: Node | string): Promise<void> {
@@ -237,7 +253,42 @@ export class PanelCommands {
         return;
       }
     }
-    if (!(await this.store.remove(id))) {
+    await this.commitRemoval(new Map([[id, count]]), "Remove Highlight");
+  }
+
+  private async commitRemoval(expected: Map<string, number>, retry: string): Promise<void> {
+    let drifted = false;
+    let missing = false;
+    const saved = await this.store.transaction((annotations) => {
+      let changed = false;
+      for (const [id, count] of expected) {
+        const current = annotations.get(id);
+        if (!current) {
+          missing = true;
+          continue;
+        }
+        if (current.comments.length !== count) {
+          drifted = true;
+          return false;
+        }
+        annotations.delete(id);
+        changed = true;
+      }
+      return changed;
+    });
+    if (drifted) {
+      await this.store.refresh();
+      void vscode.window.showWarningMessage(
+        `Those comments just changed. Run ${retry} again to confirm.`
+      );
+      return;
+    }
+    if (missing) {
+      await this.store.refresh();
+      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      return;
+    }
+    if (!saved) {
       void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
     }
   }
@@ -246,7 +297,7 @@ export class PanelCommands {
     if (!node || node.kind !== "file") {
       return;
     }
-    const annotations = this.store.forFile(node.file);
+    const annotations = node.annotations.filter((entry) => this.store.byId(entry.id) !== undefined);
     if (annotations.length === 0) {
       return;
     }
@@ -259,22 +310,37 @@ export class PanelCommands {
     if (confirmed !== "Remove") {
       return;
     }
-    const ids = new Set(annotations.map((entry) => entry.id));
-    const saved = await this.store.transaction((current) => {
-      let changed = false;
-      for (const id of ids) {
-        changed = current.delete(id) || changed;
-      }
-      return changed;
-    });
-    if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+    await this.commitRemoval(
+      new Map(annotations.map((entry) => [entry.id, entry.comments.length])),
+      "Delete All Highlights in File"
+    );
+  }
+
+  async deleteOrphansEverywhere(): Promise<void> {
+    const orphans = this.store.all.filter((annotation) => annotation.orphaned === true);
+    if (orphans.length === 0) {
+      void vscode.window.showInformationMessage("No orphaned highlights in this project.");
+      return;
     }
+    const comments = orphans.reduce((sum, entry) => sum + entry.comments.length, 0);
+    const detail =
+      comments === 0
+        ? `Delete ${countLabel(orphans.length, "orphaned highlight")}?`
+        : `Delete ${countLabel(orphans.length, "orphaned highlight")} and ${countLabel(comments, "comment")}?`;
+    const confirmed = await vscode.window.showWarningMessage(detail, { modal: true }, "Delete");
+    if (confirmed !== "Delete") {
+      return;
+    }
+    await this.commitRemoval(
+      new Map(orphans.map((entry) => [entry.id, entry.comments.length])),
+      "Delete All Orphaned Highlights"
+    );
   }
 
   async filterByColor(): Promise<void> {
+    const palette = readPalette(this.store.rootUri);
     const used = new Set(this.store.all.map((annotation) => annotation.color));
-    const colors: PaletteColor[] = DEFAULT_PALETTE.filter((color) => used.has(color.id));
+    const colors: PaletteColor[] = palette.filter((color) => used.has(color.id));
     for (const color of used) {
       if (!colors.some((entry) => entry.id === color)) {
         colors.push({ id: color, label: color, hex: "" });
@@ -289,7 +355,7 @@ export class PanelCommands {
         { label: "All colors", id: undefined as string | undefined },
         ...colors.map((color) => ({
           label: color.label,
-          iconPath: colorIcon(color.id),
+          iconPath: colorIcon(color.id, palette),
           id: color.id as string | undefined
         }))
       ],

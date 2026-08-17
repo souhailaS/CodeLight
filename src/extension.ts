@@ -44,6 +44,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await ready;
       await panel.deleteFile(node);
     }),
+    vscode.commands.registerCommand("codelight.deleteOrphansEverywhere", async () => {
+      await ready;
+      await panel.deleteOrphansEverywhere();
+    }),
     vscode.commands.registerCommand("codelight.filterByColor", async () => {
       await ready;
       await panel.filterByColor();

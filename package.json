@@ -106,6 +106,12 @@
         "title": "Clear Filter",
         "category": "CodeLight",
         "icon": "$(filter-filled)"
+      },
+      {
+        "command": "codelight.deleteOrphansEverywhere",
+        "title": "Delete All Orphaned Highlights",
+        "category": "CodeLight",
+        "icon": "$(clear-all)"
       }
     ],
     "keybindings": [
@@ -139,6 +145,10 @@
         {
           "command": "codelight.clearFilter",
           "when": "codelight.filtered"
+        },
+        {
+          "command": "codelight.deleteAnnotation",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -177,7 +187,7 @@
           "group": "navigation@1"
         },
         {
-          "command": "codelight.removeOrphaned",
+          "command": "codelight.deleteOrphansEverywhere",
           "when": "view == codelight.annotations",
           "group": "1_cleanup"
         }
