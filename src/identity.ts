@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { Author } from "./model";
 
 const PROVIDER = "github";
-const SCOPES = ["read:user"];
+const SCOPES: string[] = [];
 
 export interface Identity extends Author {
   avatarUrl: string;

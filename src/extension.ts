@@ -5,6 +5,7 @@ import { AnnotationStore } from "./store";
 export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
   const store = new AnnotationStore();
+  const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
 
   context.subscriptions.push(
     identity,
@@ -15,7 +16,8 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showInformationMessage(`CodeLight is signed in as ${account.login}.`);
       }
     }),
-    vscode.commands.registerCommand("codelight.showStatus", () => {
+    vscode.commands.registerCommand("codelight.showStatus", async () => {
+      await ready;
       if (!store.isReady) {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
@@ -27,9 +29,6 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     })
   );
-
-  void identity.refresh();
-  void store.initialize();
 }
 
 export function deactivate(): void {}

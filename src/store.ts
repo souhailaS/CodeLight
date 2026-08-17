@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { Annotation, parseStore, serializeStore } from "./model";
-import { storeUri, workspaceRoot } from "./paths";
+import { resolveRoot, storeUri } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
 
@@ -27,6 +27,8 @@ export class AnnotationStore implements vscode.Disposable {
   private reportedFailure: string | undefined;
   private reportedDropped = 0;
   private generation = 0;
+  private writeCount = 0;
+  private blocked = false;
 
   readonly onDidChange = this.emitter.event;
 
@@ -67,7 +69,7 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async add(annotation: Annotation): Promise<boolean> {
-    if (!this.isReady) {
+    if (!this.canWrite()) {
       return false;
     }
     this.annotations.set(annotation.id, annotation);
@@ -77,7 +79,7 @@ export class AnnotationStore implements vscode.Disposable {
 
   async update(id: string, mutate: (annotation: Annotation) => Annotation): Promise<boolean> {
     const existing = this.annotations.get(id);
-    if (!this.isReady || !existing) {
+    if (!existing || !this.canWrite()) {
       return false;
     }
     this.annotations.set(id, mutate(existing));
@@ -86,19 +88,34 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async remove(id: string): Promise<boolean> {
-    if (!this.isReady || !this.annotations.delete(id)) {
+    if (!this.annotations.has(id) || !this.canWrite()) {
       return false;
     }
+    this.annotations.delete(id);
     await this.persist();
     return true;
   }
 
+  private canWrite(): boolean {
+    if (!this.isReady) {
+      return false;
+    }
+    if (this.blocked) {
+      void vscode.window.showErrorMessage(
+        "CodeLight will not save while .vscode/codelight.json cannot be read. Fix the file, then reload the window."
+      );
+      return false;
+    }
+    return true;
+  }
+
   private async bind(): Promise<void> {
-    const root = workspaceRoot();
+    const root = await resolveRoot();
     if (this.root?.toString() === root?.toString()) {
       return;
     }
     this.generation += 1;
+    this.blocked = false;
     if (this.reloadTimer) {
       clearTimeout(this.reloadTimer);
       this.reloadTimer = undefined;
@@ -139,21 +156,23 @@ export class AnnotationStore implements vscode.Disposable {
       return;
     }
     const generation = this.generation;
+    const writes = this.writeCount;
     let raw: string;
     try {
       const bytes = await vscode.workspace.fs.readFile(target);
-      if (generation !== this.generation) {
+      if (generation !== this.generation || writes !== this.writeCount) {
         return;
       }
       raw = Buffer.from(bytes).toString("utf8");
     } catch (error) {
-      if (generation !== this.generation) {
+      if (generation !== this.generation || writes !== this.writeCount) {
         return;
       }
       if (!isMissingFile(error)) {
         this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
         return;
       }
+      this.blocked = false;
       if (this.annotations.size === 0 && this.lastSerialized === undefined) {
         return;
       }
@@ -170,6 +189,7 @@ export class AnnotationStore implements vscode.Disposable {
       this.annotations = new Map(parsed.annotations.map((entry) => [entry.id, entry]));
       this.lastSerialized = raw;
       this.reportedFailure = undefined;
+      this.blocked = false;
       this.warnAboutDropped(parsed.dropped, target);
       this.emitter.fire();
     } catch (error) {
@@ -178,6 +198,7 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   private reportFailure(message: string): void {
+    this.blocked = true;
     if (this.reportedFailure === message) {
       return;
     }
@@ -206,6 +227,7 @@ export class AnnotationStore implements vscode.Disposable {
     }
     const content = serializeStore(this.all);
     const generation = this.generation;
+    this.writeCount += 1;
     this.emitter.fire();
     this.pendingWrite = this.pendingWrite.then(async () => {
       try {
