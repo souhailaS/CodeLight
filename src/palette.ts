@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { InlineMode } from "./thread";
 
 export interface PaletteColor {
   id: string;
@@ -64,6 +65,13 @@ export function readOpacity(resource?: vscode.Uri): number {
     return DEFAULT_OPACITY;
   }
   return Math.min(1, Math.max(0.05, configured));
+}
+
+export function readInlineMode(resource?: vscode.Uri): InlineMode {
+  const configured = configuration(resource).get<unknown>("inlineComments");
+  return configured === "off" || configured === "count" || configured === "preview"
+    ? configured
+    : "preview";
 }
 
 export function resolveColor(palette: readonly PaletteColor[], id: string): PaletteColor {
