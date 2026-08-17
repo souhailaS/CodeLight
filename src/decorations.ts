@@ -45,6 +45,7 @@ export class HighlightRenderer implements vscode.Disposable {
     const root = this.store.rootUri;
     const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
     const annotations = relative ? this.store.forFile(relative) : [];
+    const spans = annotations.length > 0 ? this.live.spansFor(editor.document) : undefined;
     const grouped = new Map<string, vscode.Range[]>();
     for (const key of this.types.keys()) {
       grouped.set(key, []);
@@ -55,7 +56,7 @@ export class HighlightRenderer implements vscode.Disposable {
         : resolveColor(this.palette, annotation.color).id;
       const ranges = grouped.get(key);
       if (ranges) {
-        ranges.push(this.live.rangeFor(editor.document, annotation));
+        ranges.push(this.live.rangeFor(editor.document, annotation, spans));
       }
     }
     for (const [key, ranges] of grouped) {

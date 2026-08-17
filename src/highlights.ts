@@ -118,6 +118,9 @@ export class HighlightCommands {
       void vscode.window.showWarningMessage("CodeLight could not save the highlight.");
       return undefined;
     }
+    if (editor.document.isDirty) {
+      await this.live.flushDocument(editor.document);
+    }
     return annotation;
   }
 
@@ -132,9 +135,11 @@ export class HighlightCommands {
       return [];
     }
     const position = editor.selection.active;
-    return this.store
-      .forFile(relative)
-      .filter((annotation) => this.live.rangeFor(editor.document, annotation).contains(position));
+    const spans = this.live.spansFor(editor.document);
+    return this.store.forFile(relative).filter((annotation) => {
+      const range = this.live.rangeFor(editor.document, annotation, spans);
+      return range.isEmpty ? range.start.line === position.line : range.contains(position);
+    });
   }
 
   async pickAtCursor(title: string): Promise<Annotation | undefined> {

@@ -1,31 +1,13 @@
 import * as vscode from "vscode";
 import { Annotation } from "./model";
 import { toRelativePath } from "./paths";
+import { shiftSpan, Span } from "./ranges";
 import { AnnotationStore } from "./store";
 
-interface Span {
-  start: number;
-  end: number;
-}
-
-function shiftPoint(point: number, start: number, end: number, delta: number): number {
-  if (point <= start) {
-    return point;
-  }
-  if (point >= end) {
-    return point + delta;
-  }
-  return start;
-}
-
-function shiftSpan(span: Span, start: number, end: number, delta: number): Span {
-  const nextStart = shiftPoint(span.start, start, end, delta);
-  const nextEnd = shiftPoint(span.end, start, end, delta);
-  return { start: nextStart, end: Math.max(nextStart, nextEnd) };
-}
+export type SpanMap = Map<string, Span>;
 
 export class LiveRanges implements vscode.Disposable {
-  private readonly documents = new Map<string, Map<string, Span>>();
+  private readonly documents = new Map<string, SpanMap>();
   private readonly disposables: vscode.Disposable[] = [];
   private readonly changeEmitter = new vscode.EventEmitter<vscode.TextDocument>();
 
@@ -33,17 +15,30 @@ export class LiveRanges implements vscode.Disposable {
 
   constructor(private readonly store: AnnotationStore) {
     this.disposables.push(
+      vscode.workspace.onDidOpenTextDocument((document) => {
+        this.spansFor(document);
+      }),
       vscode.workspace.onDidChangeTextDocument((event) => this.applyChanges(event)),
-      vscode.workspace.onDidSaveTextDocument((document) => void this.flush(document)),
+      vscode.workspace.onDidSaveTextDocument((document) => void this.flushDocument(document)),
       vscode.workspace.onDidCloseTextDocument((document) => {
         this.documents.delete(document.uri.toString());
-      })
+      }),
+      store.onDidChange(() => this.seedOpenDocuments())
     );
+    this.seedOpenDocuments();
   }
 
-  rangeFor(document: vscode.TextDocument, annotation: Annotation): vscode.Range {
-    const spans = this.sync(document);
-    const span = spans?.get(annotation.id);
+  spansFor(document: vscode.TextDocument): SpanMap | undefined {
+    const relative = this.relativePath(document);
+    if (!relative) {
+      return undefined;
+    }
+    return this.sync(document, this.store.forFile(relative));
+  }
+
+  rangeFor(document: vscode.TextDocument, annotation: Annotation, spans?: SpanMap): vscode.Range {
+    const resolved = spans ?? this.spansFor(document);
+    const span = resolved?.get(annotation.id);
     if (!span) {
       return document.validateRange(
         new vscode.Range(
@@ -57,21 +52,68 @@ export class LiveRanges implements vscode.Disposable {
     return new vscode.Range(document.positionAt(span.start), document.positionAt(span.end));
   }
 
+  async flushDocument(document: vscode.TextDocument): Promise<void> {
+    const relative = this.relativePath(document);
+    const spans = relative ? this.documents.get(document.uri.toString()) : undefined;
+    if (!relative || !spans || spans.size === 0) {
+      return;
+    }
+    const moved = new Map<string, { start: vscode.Position; end: vscode.Position }>();
+    for (const annotation of this.store.forFile(relative)) {
+      const span = spans.get(annotation.id);
+      if (!span) {
+        continue;
+      }
+      const current = this.spanOf(document, annotation);
+      if (current.start === span.start && current.end === span.end) {
+        continue;
+      }
+      moved.set(annotation.id, {
+        start: document.positionAt(span.start),
+        end: document.positionAt(span.end)
+      });
+    }
+    if (moved.size === 0) {
+      return;
+    }
+    await this.store.transaction((annotations) => {
+      let changed = false;
+      for (const [id, position] of moved) {
+        const annotation = annotations.get(id);
+        if (!annotation) {
+          continue;
+        }
+        annotations.set(id, {
+          ...annotation,
+          range: {
+            startLine: position.start.line,
+            startCharacter: position.start.character,
+            endLine: position.end.line,
+            endCharacter: position.end.character
+          }
+        });
+        changed = true;
+      }
+      return changed;
+    });
+  }
+
+  private seedOpenDocuments(): void {
+    for (const document of vscode.workspace.textDocuments) {
+      this.spansFor(document);
+    }
+  }
+
   private relativePath(document: vscode.TextDocument): string | undefined {
     const root = this.store.rootUri;
     return root ? toRelativePath(root, document.uri) : undefined;
   }
 
-  private sync(document: vscode.TextDocument): Map<string, Span> | undefined {
-    const relative = this.relativePath(document);
-    if (!relative) {
-      return undefined;
-    }
-    const stored = this.store.forFile(relative);
+  private sync(document: vscode.TextDocument, stored: readonly Annotation[]): SpanMap {
     const key = document.uri.toString();
     const existing = this.documents.get(key);
     if (!existing || !document.isDirty) {
-      const fresh = new Map<string, Span>();
+      const fresh: SpanMap = new Map();
       for (const annotation of stored) {
         fresh.set(annotation.id, this.spanOf(document, annotation));
       }
@@ -119,51 +161,6 @@ export class LiveRanges implements vscode.Disposable {
       }
     }
     this.changeEmitter.fire(event.document);
-  }
-
-  private async flush(document: vscode.TextDocument): Promise<void> {
-    const relative = this.relativePath(document);
-    const spans = relative ? this.documents.get(document.uri.toString()) : undefined;
-    if (!relative || !spans || spans.size === 0) {
-      return;
-    }
-    const moved = new Map<string, Span>();
-    for (const annotation of this.store.forFile(relative)) {
-      const span = spans.get(annotation.id);
-      if (!span) {
-        continue;
-      }
-      const current = this.spanOf(document, annotation);
-      if (current.start !== span.start || current.end !== span.end) {
-        moved.set(annotation.id, span);
-      }
-    }
-    if (moved.size === 0) {
-      return;
-    }
-    this.documents.delete(document.uri.toString());
-    await this.store.transaction((annotations) => {
-      let changed = false;
-      for (const [id, span] of moved) {
-        const annotation = annotations.get(id);
-        if (!annotation) {
-          continue;
-        }
-        const start = document.positionAt(span.start);
-        const end = document.positionAt(span.end);
-        annotations.set(id, {
-          ...annotation,
-          range: {
-            startLine: start.line,
-            startCharacter: start.character,
-            endLine: end.line,
-            endCharacter: end.character
-          }
-        });
-        changed = true;
-      }
-      return changed;
-    });
   }
 
   dispose(): void {
