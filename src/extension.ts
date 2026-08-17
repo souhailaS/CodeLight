@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CommentCommands } from "./comments";
 import { HighlightRenderer } from "./decorations";
 import { HighlightCommands } from "./highlights";
 import { IdentityProvider } from "./identity";
@@ -11,6 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const live = new LiveRanges(store);
   const renderer = new HighlightRenderer(store, live);
   const highlights = new HighlightCommands(store, identity, renderer, live);
+  const comments = new CommentCommands(store, identity, highlights);
   const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
 
   context.subscriptions.push(
@@ -39,6 +41,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("codelight.removeOrphaned", async () => {
       await ready;
       await highlights.removeOrphaned();
+    }),
+    vscode.commands.registerCommand("codelight.addComment", async () => {
+      await ready;
+      await comments.add();
+    }),
+    vscode.commands.registerCommand("codelight.reply", async (annotationId?: string) => {
+      await ready;
+      await comments.add(annotationId);
+    }),
+    vscode.commands.registerCommand("codelight.editComment", async (annotationId?: string) => {
+      await ready;
+      await comments.edit(annotationId);
+    }),
+    vscode.commands.registerCommand("codelight.deleteComment", async (annotationId?: string) => {
+      await ready;
+      await comments.remove(annotationId);
     }),
     vscode.commands.registerCommand("codelight.showStatus", async () => {
       await ready;
