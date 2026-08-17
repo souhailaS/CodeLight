@@ -16,6 +16,8 @@ Reading notes have nowhere good to live today. Put them in the source and they b
 
 CodeLight makes commenting a layer of its own. Highlight anything, attach a note, and share it with your team through the repository you already share, without touching a single line of code.
 
+And when a note should never reach the repository at all, it does not have to. Add `.vscode/codelight.json` to your `.gitignore` and every highlight and comment stays on your machine, private to you, while still sitting exactly where the code is. Nothing you jot down while reading has to become someone else's diff.
+
 ## What it does
 
 * Highlight any selection in a colour of your choice, with a palette you can redefine.

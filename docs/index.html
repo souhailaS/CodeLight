@@ -95,6 +95,7 @@
   <p>Generated comments explain what the code does. They say nothing about what you noticed while reading it, what looked wrong, or what you wanted a colleague to confirm.</p>
   <p>Reading notes have nowhere good to live today. Put them in the source and they become part of the product, they show up in everyone's diff, and someone has to remember to take them out. Put them in a pull request and they are trapped in a branch that may sit unmerged for weeks, invisible to anyone not reviewing it, and gone the moment the branch is.</p>
   <p>CodeLight makes commenting a layer of its own. Highlight anything, attach a note, and share it with your team through the repository you already share, without touching a single line of code.</p>
+  <p>And when a note should never reach the repository at all, it does not have to. Add <code>.vscode/codelight.json</code> to your <code>.gitignore</code> and every highlight and comment stays on your machine, private to you, while still sitting exactly where the code is. Nothing you jot down while reading has to become someone else's diff.</p>
 </section>
 
 <section>
@@ -117,8 +118,8 @@
       <p>Browse every annotation from the activity bar, grouped by file and filtered by colour.</p>
     </div>
     <div class="card">
-      <h3>Share through git</h3>
-      <p>Commit one file to share annotations, or ignore it to keep them to yourself.</p>
+      <h3>Share, or do not</h3>
+      <p>Commit one file to share annotations with the team, or gitignore it and keep them private.</p>
     </div>
     <div class="card">
       <h3>Survive edits</h3>
