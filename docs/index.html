@@ -14,23 +14,34 @@
     background: #ffffff;
     font: 15px/1.65 Verdana, Geneva, Tahoma, sans-serif;
   }
-  .page { max-width: 41em; margin: 0 auto; padding: 34px 22px 80px; }
-  .head { display: flex; align-items: center; gap: 14px; }
-  .head img { width: 52px; height: 52px; }
-  h1 { font-size: 23px; margin: 0; letter-spacing: -0.01em; }
-  .sub { margin: 4px 0 0; font-size: 14px; color: #444444; }
+  aside {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 32%;
+    box-sizing: border-box; padding: 30px 38px;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    border-right: 1px solid #dddddd;
+  }
+  .side { width: 100%; max-width: 300px; }
+  .brand { display: flex; align-items: center; gap: 13px; }
+  .brand img { width: 50px; height: 50px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub { margin: 10px 0 0; font-size: 13.5px; color: #444444; }
   .mark { background: #ffd54f; padding: 0 3px; }
+  nav { margin: 26px 0 0; }
+  nav a { display: block; margin: 0 0 7px; font-size: 13.5px; }
+  .aside-foot { margin: 26px 0 0; font-size: 12px; color: #666666; }
+  main { margin-left: 34%; width: 60%; max-width: 900px; padding: 44px 0 90px; }
   h2 {
     font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;
-    color: #666666; margin: 34px 0 10px; padding-bottom: 5px; border-bottom: 1px solid #dddddd;
+    color: #666666; margin: 0 0 12px; padding-bottom: 5px; border-bottom: 1px solid #dddddd;
   }
+  section { margin: 0 0 44px; }
   h3 { font-size: 15px; margin: 20px 0 4px; }
+  section > h3:first-of-type { margin-top: 0; }
   p { margin: 0 0 12px; }
   ul { margin: 0 0 12px; padding-left: 22px; }
   li { margin: 0 0 6px; }
   a { color: #0000cc; }
   a:visited { color: #551a8b; }
-  nav a { margin-right: 14px; white-space: nowrap; }
   pre {
     background: #f6f6f6; border: 1px solid #dddddd; padding: 10px 12px;
     overflow-x: auto; font-size: 12.5px; line-height: 1.5;
@@ -40,36 +51,41 @@
   th, td { border: 1px solid #dddddd; padding: 5px 10px; text-align: left; vertical-align: top; }
   th { background: #f6f6f6; font-weight: bold; }
   kbd { font-family: Menlo, Consolas, "Courier New", monospace; font-size: 12.5px; }
-  hr { border: 0; border-top: 1px solid #dddddd; margin: 34px 0; }
-  .foot { font-size: 12.5px; color: #666666; }
+  @media (max-width: 900px) {
+    aside {
+      position: static; width: auto; border-right: 0; border-bottom: 1px solid #dddddd;
+      padding: 26px 22px; align-items: flex-start;
+    }
+    .side { max-width: none; }
+    nav a { display: inline-block; margin-right: 16px; }
+    main { margin-left: 0; width: auto; padding: 30px 22px 70px; }
+  }
 </style>
 </head>
 <body>
-<div class="page">
 
-<div class="head">
-  <img src="icon.png" alt="" />
-  <div>
+<aside>
+<div class="side">
+  <div class="brand">
+    <img src="icon.png" alt="" />
     <h1>CodeLight</h1>
-    <p class="sub">Shared <span class="mark">highlights and comments</span> for VS Code.</p>
   </div>
+  <p class="sub">Shared <span class="mark">highlights and comments</span> for VS Code, kept beside your code instead of inside it.</p>
+  <nav>
+    <a href="#why">Why</a>
+    <a href="#what">What it does</a>
+    <a href="#use">Using it</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/souhailaS/CodeLight">Source on GitHub</a>
+  </nav>
+  <p class="aside-foot">MIT licensed. Built by <a href="https://github.com/souhailaS">souhailaS</a>.</p>
 </div>
+</aside>
 
-<p style="margin-top:18px">
-  Notes kept beside your code instead of inside it.
-  <a href="https://github.com/souhailaS/CodeLight">Source on GitHub</a>.
-</p>
+<main>
 
-<nav>
-  <a href="#why">Why</a>
-  <a href="#what">What it does</a>
-  <a href="#use">Using it</a>
-  <a href="#install">Install</a>
-</nav>
-
-<hr />
-
-<h2 id="why">Why</h2>
+<section id="why">
+<h2>Why</h2>
 
 <h3>We read more than we write</h3>
 <p>VS Code stopped being only a code editor long ago. People draft documents in it, read specifications in it, and work through unfamiliar repositories in it.</p>
@@ -85,10 +101,10 @@
 
 <h3>So make commenting its own layer</h3>
 <p>Highlight anything, attach a note, and share it through the repository you already share, without touching a line of code. Or keep it to yourself. Add <code>.vscode/codelight.json</code> to your <code>.gitignore</code> and nothing you jot down while reading ever becomes someone else's diff.</p>
+</section>
 
-<hr />
-
-<h2 id="what">What it does</h2>
+<section id="what">
+<h2>What it does</h2>
 <ul>
   <li>Highlights any selection in a colour you choose, from a palette you can redefine.</li>
   <li>Attaches comments and replies, each one attributed to a verified GitHub account.</li>
@@ -97,17 +113,19 @@
   <li>Moves highlights with your edits, and finds the text again when it moves away.</li>
   <li>Keeps everything in one file under <code>.vscode</code>, so annotations travel through git exactly like code.</li>
 </ul>
+</section>
 
-<hr />
-
-<h2 id="use">Using it</h2>
+<section id="use">
+<h2>Using it</h2>
 <table>
   <tr><th>Action</th><th>macOS</th><th>Windows and Linux</th></tr>
   <tr><td>Highlight the selection</td><td><kbd>cmd alt K</kbd></td><td><kbd>ctrl K</kbd> then <kbd>ctrl H</kbd></td></tr>
   <tr><td>Comment on the selection</td><td><kbd>cmd alt M</kbd></td><td><kbd>ctrl K</kbd> then <kbd>ctrl M</kbd></td></tr>
 </table>
 <p>Everything else is in the command palette under CodeLight, in the editor right click menu, and in the panel behind the CodeLight icon in the activity bar.</p>
+</section>
 
+<section>
 <h2>Settings</h2>
 <table>
   <tr><th>Setting</th><th>Default</th><th>Meaning</th></tr>
@@ -115,21 +133,18 @@
   <tr><td><code>codelight.highlightOpacity</code></td><td><code>0.3</code></td><td>Strength of the highlight background</td></tr>
   <tr><td><code>codelight.inlineComments</code></td><td><code>preview</code></td><td>Latest comment, a count, or nothing</td></tr>
 </table>
+</section>
 
-<hr />
-
-<h2 id="install">Install</h2>
+<section id="install">
+<h2>Install</h2>
 <p>Not on the marketplace yet. Build it and install the package.</p>
 <pre><code>git clone https://github.com/souhailaS/CodeLight.git
 cd CodeLight
 npm install
 npx @vscode/vsce package
 code --install-extension codelight-0.0.1.vsix</code></pre>
+</section>
 
-<hr />
-
-<p class="foot">MIT licensed. Built by <a href="https://github.com/souhailaS">souhailaS</a>.</p>
-
-</div>
+</main>
 </body>
 </html>
