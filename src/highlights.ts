@@ -4,10 +4,9 @@ import { HighlightRenderer } from "./decorations";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
-import { Anchor, Annotation, Author, Comment } from "./model";
+import { Anchor, Annotation } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
-import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
 import { snippet } from "./thread";
 
@@ -45,7 +44,7 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(compose?: (author: Author) => Promise<Comment | undefined>): Promise<Annotation[]> {
+  async add(): Promise<Annotation[]> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -101,10 +100,6 @@ export class HighlightCommands {
       );
       return [];
     }
-    const seed = compose ? await compose({ login: author.login, id: author.id }) : undefined;
-    if (compose && !seed) {
-      return [];
-    }
     let placed = ranges;
     let placedAnchors = anchors;
     if (editor.document.version !== version) {
@@ -114,9 +109,8 @@ export class HighlightCommands {
       for (const [index, anchor] of anchors.entries()) {
         const found = findAnchor(current, anchor);
         if (!found) {
-          const rescued = seed ? await rescue(seed.body) : false;
           void vscode.window.showWarningMessage(
-            withRescue("The file changed and the selection could not be found again.", rescued)
+            "The file changed and the selection could not be found again."
           );
           return [];
         }
@@ -145,7 +139,7 @@ export class HighlightCommands {
       author: { login: author.login, id: author.id },
       createdAt: now,
       updatedAt: now,
-      comments: seed ? [{ ...seed, id: newId() }] : []
+      comments: []
     })) as Annotation[];
     const saved = await this.store.transaction((annotations) => {
       for (const annotation of created) {
@@ -154,10 +148,7 @@ export class HighlightCommands {
       return true;
     });
     if (!saved) {
-      const rescued = seed ? await rescue(seed.body) : false;
-      void vscode.window.showWarningMessage(
-        withRescue("CodeLight could not save the highlight.", rescued)
-      );
+      void vscode.window.showWarningMessage("CodeLight could not save the highlight.");
       return [];
     }
     return created;

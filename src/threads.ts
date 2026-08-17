@@ -5,6 +5,7 @@ import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { readPalette } from "./palette";
+import { rescue, withRescue } from "./rescue";
 import { toRelativePath, toUri } from "./paths";
 import { AnnotationStore } from "./store";
 
@@ -47,7 +48,7 @@ export class ThreadView implements vscode.Disposable {
   private readonly threads = new Map<string, vscode.CommentThread>();
   private readonly owners = new Map<vscode.CommentThread, string>();
   private readonly drafts = new Set<string>();
-  private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number }>();
+  private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number; length: number }>();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -87,14 +88,23 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     if (body.length > MAX_COMMENT_BODY) {
-      await vscode.env.clipboard.writeText(body).then(undefined, () => undefined);
+      const rescued = await rescue(body);
       void vscode.window.showWarningMessage(
-        `Keep comments under ${MAX_COMMENT_BODY} characters. This one is ${body.length} and was copied to the clipboard.`
+        withRescue(
+          `Keep comments under ${MAX_COMMENT_BODY} characters. This one is ${body.length}.`,
+          rescued
+        )
       );
       return;
     }
     const author = await this.identity.require();
     if (!author) {
+      const rescued = await rescue(body);
+      if (rescued) {
+        void vscode.window.showInformationMessage(
+          "Your comment was copied to the clipboard. Sign in and paste it back."
+        );
+      }
       return;
     }
     const now = timestamp();
@@ -107,9 +117,9 @@ export class ThreadView implements vscode.Disposable {
     };
     const owned = this.owners.get(reply.thread);
     if (owned !== undefined && this.store.byId(owned)?.orphaned === true) {
-      await vscode.env.clipboard.writeText(body).then(undefined, () => undefined);
+      const rescued = await rescue(body);
       void vscode.window.showWarningMessage(
-        "That highlight lost its text, so the comment was not saved. It was copied to the clipboard."
+        withRescue("That highlight lost its text, so the comment was not saved.", rescued)
       );
       return;
     }
@@ -132,9 +142,9 @@ export class ThreadView implements vscode.Disposable {
         comments: [...current.comments, comment]
       }));
       if (!saved) {
-        await vscode.env.clipboard.writeText(body).then(undefined, () => undefined);
+        const rescued = await rescue(body);
         void vscode.window.showWarningMessage(
-          "CodeLight could not save the comment. It was copied to the clipboard."
+          withRescue("CodeLight could not save the comment.", rescued)
         );
         return;
       }
@@ -219,8 +229,10 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const now = timestamp();
+    let ran = false;
     let found = false;
     const saved = await this.store.transaction((annotations) => {
+      ran = true;
       const current = annotations.get(comment.annotationId);
       if (!current || !current.comments.some((entry) => entry.id === comment.commentId)) {
         return false;
@@ -236,12 +248,13 @@ export class ThreadView implements vscode.Disposable {
       return true;
     });
     if (!saved) {
-      await vscode.env.clipboard.writeText(body).then(undefined, () => undefined);
-      void vscode.window.showWarningMessage(
-        found
-          ? "CodeLight could not save the comment. It was copied to the clipboard."
-          : "That comment is no longer in the shared file. Your text was copied to the clipboard."
-      );
+      const rescued = await rescue(body);
+      const reason = !ran
+        ? "CodeLight could not update the shared file."
+        : found
+          ? "CodeLight could not save the comment."
+          : "That comment is no longer in the shared file.";
+      void vscode.window.showWarningMessage(withRescue(reason, rescued));
       return;
     }
     if (edited instanceof ThreadComment) {
@@ -285,17 +298,23 @@ export class ThreadView implements vscode.Disposable {
       );
       return;
     }
-    const selection = editor.selection;
-    const range = selection.isEmpty
-      ? editor.document.lineAt(selection.active.line).range
-      : new vscode.Range(selection.start, selection.end);
-    if (range.isEmpty) {
+    const candidates: vscode.Range[] = [];
+    for (const selection of editor.selections) {
+      const candidate = selection.isEmpty
+        ? editor.document.lineAt(selection.active.line).range
+        : new vscode.Range(selection.start, selection.end);
+      if (!candidate.isEmpty) {
+        candidates.push(candidate);
+      }
+    }
+    const range = candidates[0];
+    if (!range) {
       void vscode.window.showWarningMessage(
         "This line is empty. Select some text to comment on."
       );
       return;
     }
-    if (editor.selections.length > 1) {
+    if (candidates.length > 1) {
       void vscode.window.showInformationMessage(
         "CodeLight comments on one selection at a time. Using the first one."
       );
@@ -318,7 +337,8 @@ export class ThreadView implements vscode.Disposable {
         editor.document.offsetAt(range.start),
         editor.document.offsetAt(range.end)
       ),
-      version: editor.document.version
+      version: editor.document.version,
+      length: editor.document.offsetAt(range.end) - editor.document.offsetAt(range.start)
     });
     editor.selection = new vscode.Selection(range.start, range.start);
     await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
@@ -356,6 +376,12 @@ export class ThreadView implements vscode.Disposable {
       editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
     } catch {
       void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
+      return;
+    }
+    if (this.live.rangeFor(document, annotation).isEmpty) {
+      void vscode.window.showWarningMessage(
+        "That highlight lost its text. Remove it instead of commenting on it."
+      );
       return;
     }
     if (annotation.comments.length === 0) {
@@ -398,13 +424,15 @@ export class ThreadView implements vscode.Disposable {
     if (draft && document.version !== draft.version) {
       const found = findAnchor(document.getText(), draft.anchor);
       if (!found) {
-        await vscode.env.clipboard.writeText(comment.body).then(undefined, () => undefined);
+        const rescued = await rescue(comment.body);
         void vscode.window.showWarningMessage(
-          "The file changed and the selection could not be found again. Your comment was copied to the clipboard."
+          withRescue("The file changed and the selection could not be found again.", rescued)
         );
         return undefined;
       }
-      range = new vscode.Range(document.positionAt(found.start), document.positionAt(found.end));
+      const width = Math.max(found.end - found.start, draft.length);
+      const end = Math.min(document.getText().length, found.start + width);
+      range = new vscode.Range(document.positionAt(found.start), document.positionAt(end));
     } else if (requested && !requested.isEmpty) {
       range = document.validateRange(requested);
     } else {
@@ -431,9 +459,9 @@ export class ThreadView implements vscode.Disposable {
       comments: [comment]
     };
     if (!(await this.store.add(annotation))) {
-      await vscode.env.clipboard.writeText(comment.body).then(undefined, () => undefined);
+      const rescued = await rescue(comment.body);
       void vscode.window.showWarningMessage(
-        "CodeLight could not save the comment. It was copied to the clipboard."
+        withRescue("CodeLight could not save the comment.", rescued)
       );
       return undefined;
     }
