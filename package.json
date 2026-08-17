@@ -4,6 +4,7 @@
   "description": "Shared highlights and inline comments that live in .vscode",
   "version": "0.0.1",
   "license": "MIT",
+  "icon": "media/icon.png",
   "publisher": "souhailaS",
   "repository": {
     "type": "git",
