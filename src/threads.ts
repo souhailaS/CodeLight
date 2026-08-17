@@ -49,6 +49,8 @@ export class ThreadView implements vscode.Disposable {
   private readonly threads = new Map<string, vscode.CommentThread>();
   private readonly owners = new Map<vscode.CommentThread, string>();
   private readonly drafts = new Set<string>();
+  private readonly lost: { body: string; gone: boolean }[] = [];
+  private lostTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number; length: number }>();
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -73,7 +75,9 @@ export class ThreadView implements vscode.Disposable {
     );
     this.disposables.push(
       store.onDidChange(() => {
-        this.controller.commentingRangeProvider = this.rangeProvider();
+        if (readGutterMode(this.store.rootUri) === "highlights") {
+          this.controller.commentingRangeProvider = this.rangeProvider();
+        }
       })
     );
     this.disposables.push(
@@ -176,8 +180,7 @@ export class ThreadView implements vscode.Disposable {
       createdAt: now,
       updatedAt: now
     };
-    const adopted =
-      owned ?? (this.pending.has(reply.thread) ? undefined : this.annotationAt(reply.thread));
+    const adopted = owned;
     if (adopted !== undefined) {
       const annotation = this.store.byId(adopted);
       const document = vscode.workspace.textDocuments.find(
@@ -247,28 +250,40 @@ export class ThreadView implements vscode.Disposable {
       }
     }
     this.drafts.delete(annotationId);
-    if (adopted !== undefined && owned === undefined) {
-      this.pending.delete(reply.thread);
-      reply.thread.dispose();
-    } else {
-      reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    }
+    reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.sync();
   }
 
-  private async rescueLostEdit(entry: ThreadComment, gone: boolean): Promise<void> {
+  private collectLostEdit(entry: ThreadComment, gone: boolean): void {
     const body = typeof entry.body === "string" ? entry.body : entry.body.value;
     if (body.trim() === "" || body === entry.savedBody) {
       return;
     }
-    const rescued = await rescue(body);
+    this.lost.push({ body, gone });
+    if (this.lostTimer) {
+      return;
+    }
+    this.lostTimer = setTimeout(() => {
+      this.lostTimer = undefined;
+      void this.reportLostEdits();
+    }, 0);
+  }
+
+  private async reportLostEdits(): Promise<void> {
+    const pending = this.lost.splice(0, this.lost.length);
+    if (pending.length === 0) {
+      return;
+    }
+    const rescued = await rescue(pending.map((entry) => entry.body).join("\n\n"));
+    const gone = pending.every((entry) => entry.gone);
+    const many = pending.length > 1 ? ` ${pending.length} drafts were kept together.` : "";
     void vscode.window.showWarningMessage(
       withRescue(
         gone
           ? "The comment you were editing was removed from the shared file."
           : "You were editing a comment when the notes were hidden.",
         rescued
-      )
+      ) + many
     );
   }
 
@@ -659,37 +674,6 @@ export class ThreadView implements vscode.Disposable {
     this.drafts.delete(id);
   }
 
-  private annotationAt(thread: vscode.CommentThread): string | undefined {
-    const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, thread.uri) : undefined;
-    const range = thread.range;
-    if (!relative || !range) {
-      return undefined;
-    }
-    const document = vscode.workspace.textDocuments.find(
-      (entry) => entry.uri.toString() === thread.uri.toString()
-    );
-    if (!document) {
-      return undefined;
-    }
-    const spans = this.live.spansFor(document);
-    let best: { id: string; width: number } | undefined;
-    for (const annotation of this.store.forFile(relative)) {
-      if (annotation.orphaned === true) {
-        continue;
-      }
-      const live = this.live.rangeFor(document, annotation, spans);
-      if (live.isEmpty || live.start.line > range.start.line || range.start.line > live.end.line) {
-        continue;
-      }
-      const width = document.offsetAt(live.end) - document.offsetAt(live.start);
-      if (!best || width < best.width) {
-        best = { id: annotation.id, width };
-      }
-    }
-    return best?.id;
-  }
-
   private async createAnnotation(
     thread: vscode.CommentThread,
     comment: Comment | undefined,
@@ -802,7 +786,7 @@ export class ThreadView implements vscode.Disposable {
     }
     for (const [id, entry] of editing) {
       if (!annotation.comments.some((comment) => comment.id === id)) {
-        void this.rescueLostEdit(entry, true);
+        this.collectLostEdit(entry, true);
       }
     }
     thread.comments = annotation.comments.map((comment) => {
@@ -849,7 +833,7 @@ export class ThreadView implements vscode.Disposable {
         if (gone || hidden) {
           for (const entry of thread.comments) {
             if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
-              void this.rescueLostEdit(entry, gone);
+              this.collectLostEdit(entry, gone);
             }
           }
         }

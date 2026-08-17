@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { HighlightRenderer } from "./decorations";
+import { IdentityProvider } from "./identity";
 import { HighlightCommands, pickColor } from "./highlights";
 import { LiveRanges } from "./live";
 import { PaletteColor } from "./palette";
@@ -12,7 +13,6 @@ const SETTLE_MS = 600;
 interface Marked {
   id: string;
   uri: string;
-  range: vscode.Range;
 }
 
 export class MarkerMode implements vscode.Disposable {
@@ -25,6 +25,7 @@ export class MarkerMode implements vscode.Disposable {
   private last: Marked | undefined;
 
   constructor(
+    private readonly identity: IdentityProvider,
     private readonly store: AnnotationStore,
     private readonly renderer: HighlightRenderer,
     private readonly highlights: HighlightCommands,
@@ -51,6 +52,10 @@ export class MarkerMode implements vscode.Disposable {
   async toggle(): Promise<void> {
     if (this.color) {
       this.off();
+      return;
+    }
+    const author = await this.identity.require();
+    if (!author) {
       return;
     }
     const picked = await pickColor(this.renderer.colors, "Marker");
@@ -143,11 +148,10 @@ export class MarkerMode implements vscode.Disposable {
       if (!this.color) {
         return;
       }
-      this.last = {
-        id: created[0].id,
-        uri: editor.document.uri.toString(),
-        range: ranges[0]
-      };
+      this.last =
+        ranges.length === 1
+          ? { id: created[0].id, uri: editor.document.uri.toString() }
+          : undefined;
     } finally {
       this.busy = false;
     }
@@ -174,7 +178,14 @@ export class MarkerMode implements vscode.Disposable {
     if (live.isEmpty || overlap === undefined || overlap.isEmpty) {
       return;
     }
-    await this.store.remove(previous.id);
+    await this.store.transaction((annotations) => {
+      const current = annotations.get(previous.id);
+      if (!current || current.comments.length > 0) {
+        return false;
+      }
+      annotations.delete(previous.id);
+      return true;
+    });
   }
 
   private catchUp(editor: vscode.TextEditor, marked: readonly vscode.Range[]): void {

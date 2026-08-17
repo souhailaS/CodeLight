@@ -76,14 +76,19 @@ export class HighlightCommands {
       if (range.isEmpty || ranges.some((existing) => existing.isEqual(range))) {
         continue;
       }
+      if (this.alreadyMarked(editor, relative, range)) {
+        continue;
+      }
       ranges.push(range);
     }
     if (ranges.length === 0) {
-      void vscode.window.showWarningMessage(
-        editor.selections.every((selection) => selection.isEmpty)
-          ? "This line is empty. Select some text to highlight."
-          : "Select some text to highlight."
-      );
+      if (only === undefined) {
+        void vscode.window.showWarningMessage(
+          editor.selections.every((selection) => selection.isEmpty)
+            ? "This line is empty. Select some text to highlight."
+            : "That text is already highlighted."
+        );
+      }
       return [];
     }
     const text = editor.document.getText();
@@ -173,6 +178,20 @@ export class HighlightCommands {
       }
       const range = this.live.rangeFor(editor.document, annotation, spans);
       return range.isEmpty ? range.start.line === position.line : range.contains(position);
+    });
+  }
+
+  private alreadyMarked(
+    editor: vscode.TextEditor,
+    relative: string,
+    range: vscode.Range
+  ): boolean {
+    const spans = this.live.spansFor(editor.document);
+    return this.store.forFile(relative).some((annotation) => {
+      if (annotation.orphaned === true) {
+        return false;
+      }
+      return this.live.rangeFor(editor.document, annotation, spans).isEqual(range);
     });
   }
 
