@@ -229,7 +229,8 @@ export class HighlightCommands {
       }
       return changed;
     });
-    if (!saved) {
+    const remaining = [...ids].some((id) => this.store.byId(id) !== undefined);
+    if (!saved && remaining) {
       void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
     }
   }

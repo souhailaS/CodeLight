@@ -33,9 +33,11 @@ export function findAnchor(text: string, anchor: Anchor): Located | undefined {
 }
 
 export function buildAnchor(text: string, start: number, end: number): Anchor {
+  const body = text.slice(start, end).slice(0, MAX_ANCHOR_TEXT);
+  const bodyEnd = start + body.length;
   return {
-    text: text.slice(start, end).slice(0, MAX_ANCHOR_TEXT),
+    text: body,
     before: text.slice(Math.max(0, start - ANCHOR_CONTEXT), start),
-    after: text.slice(end, end + ANCHOR_CONTEXT)
+    after: text.slice(bodyEnd, bodyEnd + ANCHOR_CONTEXT)
   };
 }
