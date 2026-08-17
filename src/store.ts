@@ -125,7 +125,8 @@ export class AnnotationStore implements vscode.Disposable {
   private lastSerialized: string | undefined;
   private reportedFailure: string | undefined;
   private reportedDropped = 0;
-  private reportedDuplicate = false;
+  private reportedDuplicate: string | undefined;
+  private reportedInPlace = false;
   private sweeping = false;
   private generation = 0;
   private active: vscode.Uri | undefined;
@@ -360,13 +361,6 @@ export class AnnotationStore implements vscode.Disposable {
 
   private resolve(files: StoreFiles, plain: State, compressed: State): Outcome {
     if (plain.present && compressed.present) {
-      const active = this.active?.toString();
-      if (active === files.plain.toString()) {
-        return { target: files.plain, duplicate: true };
-      }
-      if (active === files.compressed.toString()) {
-        return { target: files.compressed, duplicate: true };
-      }
       if (plain.mtime > compressed.mtime) {
         return { target: files.plain, duplicate: true };
       }
@@ -387,8 +381,7 @@ export class AnnotationStore implements vscode.Disposable {
     }
     return [
       { present: false, mtime: 0 },
-      { present: true, mtime: Number.NEGATIVE_INFINITY },
-      { present: true, mtime: Number.POSITIVE_INFINITY }
+      { present: true, mtime: Number.NEGATIVE_INFINITY }
     ];
   }
 
@@ -518,7 +511,8 @@ export class AnnotationStore implements vscode.Disposable {
     this.lastSerialized = undefined;
     this.reportedFailure = undefined;
     this.reportedDropped = 0;
-    this.reportedDuplicate = false;
+    this.reportedDuplicate = undefined;
+    this.reportedInPlace = false;
     if (!root) {
       this.emitter.fire();
       return;
@@ -611,6 +605,7 @@ export class AnnotationStore implements vscode.Disposable {
         throw error;
       }
       await vscode.workspace.fs.writeFile(target, bytes);
+      this.warnAboutInPlace(target);
       return;
     }
     try {
@@ -701,18 +696,28 @@ export class AnnotationStore implements vscode.Disposable {
     void vscode.window.showErrorMessage(message);
   }
 
+  private warnAboutInPlace(target: vscode.Uri): void {
+    if (this.reportedInPlace) {
+      return;
+    }
+    this.reportedInPlace = true;
+    void vscode.window.showWarningMessage(
+      `CodeLight saved ${target.fsPath} in place because it cannot create a temporary file beside it. An interrupted save could truncate the store.`
+    );
+  }
+
   private warnAboutDuplicate(duplicate: Duplicate, target: vscode.Uri, files: StoreFiles): void {
     if (duplicate === "unknown") {
       return;
     }
     if (duplicate === "no") {
-      this.reportedDuplicate = false;
+      this.reportedDuplicate = undefined;
       return;
     }
-    if (this.reportedDuplicate) {
+    if (this.reportedDuplicate === target.toString()) {
       return;
     }
-    this.reportedDuplicate = true;
+    this.reportedDuplicate = target.toString();
     void vscode.window.showWarningMessage(
       `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${target.fsPath} and leaving the other file alone.`
     );
