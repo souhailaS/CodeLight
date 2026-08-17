@@ -55,4 +55,4 @@ code --install-extension codelight-0.0.1.vsix
 
 ## License
 
-MIT
+PolyForm Noncommercial 1.0.0. Free for noncommercial use, including personal projects, research and teaching. Commercial use requires a separate licence.

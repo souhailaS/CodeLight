@@ -3,7 +3,7 @@
   "displayName": "CodeLight",
   "description": "Shared highlights and inline comments that live in .vscode",
   "version": "0.1.1",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "media/icon.png",
   "publisher": "souhailaserbout",
   "homepage": "https://souhailas.github.io/CodeLight/",
