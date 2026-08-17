@@ -1,0 +1,307 @@
+import * as vscode from "vscode";
+import { LiveRanges } from "./live";
+import { Annotation, Comment } from "./model";
+import { DEFAULT_PALETTE, PaletteColor } from "./palette";
+import { toUri } from "./paths";
+import { AnnotationStore } from "./store";
+import { snippet } from "./thread";
+
+export interface FileNode {
+  kind: "file";
+  file: string;
+  annotations: Annotation[];
+}
+
+export interface AnnotationNode {
+  kind: "annotation";
+  annotation: Annotation;
+}
+
+export interface CommentNode {
+  kind: "comment";
+  annotation: Annotation;
+  comment: Comment;
+}
+
+export type Node = FileNode | AnnotationNode | CommentNode;
+
+function basename(file: string): string {
+  const parts = file.split("/");
+  return parts[parts.length - 1] ?? file;
+}
+
+function directory(file: string): string {
+  const parts = file.split("/");
+  parts.pop();
+  return parts.join("/");
+}
+
+function colorIcon(color: string): vscode.ThemeIcon {
+  const known = DEFAULT_PALETTE.some((entry) => entry.id === color);
+  return known
+    ? new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor(`codelight.${color}`))
+    : new vscode.ThemeIcon("circle-filled");
+}
+
+function countLabel(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+export class AnnotationTree implements vscode.TreeDataProvider<Node> {
+  private readonly emitter = new vscode.EventEmitter<Node | undefined>();
+  private readonly disposables: vscode.Disposable[] = [];
+  private filter: string | undefined;
+
+  readonly onDidChangeTreeData = this.emitter.event;
+
+  constructor(private readonly store: AnnotationStore) {
+    this.disposables.push(store.onDidChange(() => this.emitter.fire(undefined)));
+  }
+
+  get activeFilter(): string | undefined {
+    return this.filter;
+  }
+
+  setFilter(color: string | undefined): void {
+    this.filter = color;
+    void vscode.commands.executeCommand("setContext", "codelight.filtered", color !== undefined);
+    this.emitter.fire(undefined);
+  }
+
+  getChildren(node?: Node): Node[] {
+    if (!node) {
+      return this.files();
+    }
+    if (node.kind === "file") {
+      return node.annotations.map((annotation) => ({ kind: "annotation", annotation }));
+    }
+    if (node.kind === "annotation") {
+      return node.annotation.comments.map((comment) => ({
+        kind: "comment",
+        annotation: node.annotation,
+        comment
+      }));
+    }
+    return [];
+  }
+
+  getTreeItem(node: Node): vscode.TreeItem {
+    if (node.kind === "file") {
+      const item = new vscode.TreeItem(
+        basename(node.file),
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      const root = this.store.rootUri;
+      item.resourceUri = root ? toUri(root, node.file) : undefined;
+      item.description = directory(node.file);
+      item.contextValue = "codelight.file";
+      item.iconPath = vscode.ThemeIcon.File;
+      item.id = `file:${node.file}`;
+      return item;
+    }
+    if (node.kind === "annotation") {
+      const annotation = node.annotation;
+      const item = new vscode.TreeItem(
+        snippet(annotation),
+        annotation.comments.length > 0
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None
+      );
+      const parts = [`@${annotation.author.login}`];
+      if (annotation.comments.length > 0) {
+        parts.push(countLabel(annotation.comments.length, "comment"));
+      }
+      if (annotation.orphaned === true) {
+        parts.push("text deleted");
+      }
+      item.description = parts.join(", ");
+      item.contextValue = annotation.orphaned === true ? "codelight.orphan" : "codelight.annotation";
+      item.iconPath =
+        annotation.orphaned === true ? new vscode.ThemeIcon("circle-slash") : colorIcon(annotation.color);
+      item.id = `annotation:${annotation.id}`;
+      item.tooltip = annotation.anchor.text;
+      item.command = {
+        command: "codelight.revealAnnotation",
+        title: "Reveal",
+        arguments: [annotation.id]
+      };
+      return item;
+    }
+    const item = new vscode.TreeItem(
+      node.comment.body.replace(/\s+/g, " ").trim(),
+      vscode.TreeItemCollapsibleState.None
+    );
+    item.description = `@${node.comment.author.login}`;
+    item.iconPath = new vscode.ThemeIcon("comment");
+    item.contextValue = "codelight.comment";
+    item.id = `comment:${node.annotation.id}:${node.comment.id}`;
+    item.command = {
+      command: "codelight.revealAnnotation",
+      title: "Reveal",
+      arguments: [node.annotation.id]
+    };
+    return item;
+  }
+
+  private files(): FileNode[] {
+    const grouped = new Map<string, Annotation[]>();
+    for (const annotation of this.store.all) {
+      if (this.filter !== undefined && annotation.color !== this.filter) {
+        continue;
+      }
+      const list = grouped.get(annotation.file) ?? [];
+      list.push(annotation);
+      grouped.set(annotation.file, list);
+    }
+    return [...grouped.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([file, annotations]) => ({
+        kind: "file" as const,
+        file,
+        annotations: annotations.sort((a, b) => a.range.startLine - b.range.startLine)
+      }));
+  }
+
+  dispose(): void {
+    this.emitter.dispose();
+    for (const disposable of this.disposables) {
+      disposable.dispose();
+    }
+  }
+}
+
+export function nodeId(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return undefined;
+  }
+  const node = value as Node;
+  if (node.kind === "annotation") {
+    return node.annotation.id;
+  }
+  if (node.kind === "comment") {
+    return node.annotation.id;
+  }
+  return undefined;
+}
+
+export class PanelCommands {
+  constructor(
+    private readonly store: AnnotationStore,
+    private readonly live: LiveRanges,
+    private readonly tree: AnnotationTree
+  ) {}
+
+  async reveal(annotationId: string): Promise<void> {
+    const annotation = this.store.byId(annotationId);
+    const root = this.store.rootUri;
+    if (!annotation || !root) {
+      return;
+    }
+    const uri = toUri(root, annotation.file);
+    if (!uri) {
+      return;
+    }
+    let document: vscode.TextDocument;
+    try {
+      document = await vscode.workspace.openTextDocument(uri);
+    } catch {
+      void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
+      return;
+    }
+    const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+    const range = this.live.rangeFor(document, annotation);
+    editor.selection = new vscode.Selection(range.start, range.end);
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  }
+
+  async deleteAnnotation(node?: Node | string): Promise<void> {
+    const id = nodeId(node);
+    if (id === undefined) {
+      return;
+    }
+    const annotation = this.store.byId(id);
+    if (!annotation) {
+      return;
+    }
+    const count = annotation.comments.length;
+    if (count > 0) {
+      const confirmed = await vscode.window.showWarningMessage(
+        `Remove this highlight and its ${countLabel(count, "comment")}?`,
+        { modal: true },
+        "Remove"
+      );
+      if (confirmed !== "Remove") {
+        return;
+      }
+    }
+    if (!(await this.store.remove(id))) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+    }
+  }
+
+  async deleteFile(node?: Node): Promise<void> {
+    if (!node || node.kind !== "file") {
+      return;
+    }
+    const annotations = this.store.forFile(node.file);
+    if (annotations.length === 0) {
+      return;
+    }
+    const comments = annotations.reduce((sum, entry) => sum + entry.comments.length, 0);
+    const detail =
+      comments === 0
+        ? `Remove ${countLabel(annotations.length, "highlight")} from ${node.file}?`
+        : `Remove ${countLabel(annotations.length, "highlight")} and ${countLabel(comments, "comment")} from ${node.file}?`;
+    const confirmed = await vscode.window.showWarningMessage(detail, { modal: true }, "Remove");
+    if (confirmed !== "Remove") {
+      return;
+    }
+    const ids = new Set(annotations.map((entry) => entry.id));
+    const saved = await this.store.transaction((current) => {
+      let changed = false;
+      for (const id of ids) {
+        changed = current.delete(id) || changed;
+      }
+      return changed;
+    });
+    if (!saved) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+    }
+  }
+
+  async filterByColor(): Promise<void> {
+    const used = new Set(this.store.all.map((annotation) => annotation.color));
+    const colors: PaletteColor[] = DEFAULT_PALETTE.filter((color) => used.has(color.id));
+    for (const color of used) {
+      if (!colors.some((entry) => entry.id === color)) {
+        colors.push({ id: color, label: color, hex: "" });
+      }
+    }
+    if (colors.length === 0) {
+      void vscode.window.showInformationMessage("No highlights to filter.");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: "All colors", id: undefined as string | undefined },
+        ...colors.map((color) => ({
+          label: color.label,
+          iconPath: colorIcon(color.id),
+          id: color.id as string | undefined
+        }))
+      ],
+      { title: "Filter highlights" }
+    );
+    if (!picked) {
+      return;
+    }
+    this.tree.setFilter(picked.id);
+  }
+
+  clearFilter(): void {
+    this.tree.setFilter(undefined);
+  }
+}
