@@ -12,7 +12,9 @@ function formatDate(iso: string): string {
 }
 
 function commandLink(command: string, id: string, label: string): string {
-  const args = encodeURIComponent(JSON.stringify([id]));
+  const args = encodeURIComponent(JSON.stringify([id]))
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
   return `[${label}](command:${command}?${args})`;
 }
 

@@ -3,6 +3,7 @@ import { HighlightCommands } from "./highlights";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { Annotation, Comment } from "./model";
+import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 
 const MAX_BODY = 2000;
@@ -45,13 +46,26 @@ export class CommentCommands {
       await this.highlights.add(comment);
       return;
     }
-    const saved = await this.store.update(target.id, (current) => ({
-      ...current,
-      updatedAt: now,
-      comments: [...current.comments, comment]
-    }));
+    let ran = false;
+    const saved = await this.store.transaction((annotations) => {
+      ran = true;
+      const current = annotations.get(target.id);
+      if (!current) {
+        return false;
+      }
+      annotations.set(target.id, {
+        ...current,
+        updatedAt: now,
+        comments: [...current.comments, comment]
+      });
+      return true;
+    });
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
+      void vscode.window.showWarningMessage(
+        ran
+          ? "That highlight is no longer in the shared file."
+          : "CodeLight could not update the shared file."
+      );
     }
   }
 
@@ -114,8 +128,10 @@ export class CommentCommands {
     picked: { annotation: Annotation; comment: Comment },
     change: (comments: Comment[]) => Comment[]
   ): Promise<void> {
+    let ran = false;
     let found = false;
     const saved = await this.store.transaction((annotations) => {
+      ran = true;
       const current = annotations.get(picked.annotation.id);
       if (!current || !current.comments.some((entry) => entry.id === picked.comment.id)) {
         return false;
@@ -128,6 +144,10 @@ export class CommentCommands {
       });
       return true;
     });
+    if (!ran) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      return;
+    }
     if (!found) {
       void vscode.window.showWarningMessage("That comment is no longer in the shared file.");
       return;
@@ -151,6 +171,17 @@ export class CommentCommands {
       void vscode.window.showWarningMessage("Open a file to comment on.");
       return undefined;
     }
+    const root = this.store.rootUri;
+    const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
+    if (!relative) {
+      const folder = root ? root.path.split("/").pop() : undefined;
+      void vscode.window.showWarningMessage(
+        folder
+          ? `CodeLight is tracking the folder ${folder} and cannot annotate files outside it.`
+          : "CodeLight needs an open folder."
+      );
+      return undefined;
+    }
     if (editor.selections.some((selection) => !selection.isEmpty)) {
       return CREATE;
     }
@@ -158,7 +189,7 @@ export class CommentCommands {
     if (candidates.length === 0) {
       return CREATE;
     }
-    const picked = await this.highlights.pickAtCursor("Comment on highlight");
+    const picked = await this.highlights.pickAtCursor("Comment on highlight", candidates);
     return picked ? this.live(picked) : undefined;
   }
 

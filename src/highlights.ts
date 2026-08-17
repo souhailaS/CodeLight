@@ -122,7 +122,7 @@ export class HighlightCommands {
       author: { login: author.login, id: author.id },
       createdAt: now,
       updatedAt: now,
-      comments: initialComment ? [initialComment] : []
+      comments: initialComment ? [{ ...initialComment, id: newId() }] : []
     })) as Annotation[];
     const saved = await this.store.transaction((annotations) => {
       for (const annotation of created) {
@@ -158,8 +158,8 @@ export class HighlightCommands {
     });
   }
 
-  async pickAtCursor(title: string): Promise<Annotation | undefined> {
-    const candidates = this.atCursor();
+  async pickAtCursor(title: string, provided?: Annotation[]): Promise<Annotation | undefined> {
+    const candidates = provided ?? this.atCursor();
     if (candidates.length === 0) {
       void vscode.window.showInformationMessage("No CodeLight highlight at the cursor.");
       return undefined;
@@ -212,7 +212,10 @@ export class HighlightCommands {
     const picked = await vscode.window.showQuickPick(
       orphans.map((annotation) => ({
         label: snippet(annotation),
-        description: `by ${annotation.author.login}`,
+        description:
+          annotation.comments.length === 0
+            ? `by ${annotation.author.login}`
+            : `by ${annotation.author.login}, ${annotation.comments.length} comment${annotation.comments.length === 1 ? "" : "s"} will be deleted`,
         picked: true,
         annotation
       })),

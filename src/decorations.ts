@@ -63,7 +63,7 @@ export class HighlightRenderer implements vscode.Disposable {
     for (const key of this.types.keys()) {
       grouped.set(key, []);
     }
-    const badges: vscode.DecorationOptions[] = [];
+    const labels = new Map<number, string[]>();
     for (const annotation of annotations) {
       if (annotation.orphaned === true) {
         continue;
@@ -79,11 +79,9 @@ export class HighlightRenderer implements vscode.Disposable {
       options.push({ range, hoverMessage: this.hover(annotation) });
       const label = inlineLabel(annotation, this.inline);
       if (label !== undefined) {
-        const lineEnd = editor.document.lineAt(range.end.line).range.end;
-        badges.push({
-          range: new vscode.Range(lineEnd, lineEnd),
-          renderOptions: { after: { contentText: label } }
-        });
+        const line = labels.get(range.end.line) ?? [];
+        line.push(label.trim());
+        labels.set(range.end.line, line);
       }
     }
     for (const [key, options] of grouped) {
@@ -93,6 +91,14 @@ export class HighlightRenderer implements vscode.Disposable {
       }
     }
     if (this.badge) {
+      const badges: vscode.DecorationOptions[] = [];
+      for (const [line, parts] of labels) {
+        const lineEnd = editor.document.lineAt(line).range.end;
+        badges.push({
+          range: new vscode.Range(lineEnd, lineEnd),
+          renderOptions: { after: { contentText: ` ${parts.join("  ·  ")}` } }
+        });
+      }
       editor.setDecorations(this.badge, badges);
     }
   }
