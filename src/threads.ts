@@ -3,7 +3,7 @@ import { buildAnchor } from "./anchors";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
-import { Annotation, Comment } from "./model";
+import { Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { DEFAULT_PALETTE } from "./palette";
 import { toRelativePath, toUri } from "./paths";
 import { AnnotationStore } from "./store";
@@ -47,6 +47,7 @@ export class ThreadView implements vscode.Disposable {
   private readonly threads = new Map<string, vscode.CommentThread>();
   private readonly owners = new Map<vscode.CommentThread, string>();
   private readonly drafts = new Set<string>();
+  private readonly pending = new Set<vscode.CommentThread>();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -83,6 +84,12 @@ export class ThreadView implements vscode.Disposable {
   async reply(reply: vscode.CommentReply): Promise<void> {
     const body = reply.text.trim();
     if (body === "") {
+      return;
+    }
+    if (body.length > MAX_COMMENT_BODY) {
+      void vscode.window.showWarningMessage(
+        `Keep comments under ${MAX_COMMENT_BODY} characters. This one is ${body.length}.`
+      );
       return;
     }
     const author = await this.identity.require();
@@ -161,6 +168,12 @@ export class ThreadView implements vscode.Disposable {
       this.cancelEdit(comment);
       return;
     }
+    if (body.length > MAX_COMMENT_BODY) {
+      void vscode.window.showWarningMessage(
+        `Keep comments under ${MAX_COMMENT_BODY} characters. This one is ${body.length}.`
+      );
+      return;
+    }
     const now = timestamp();
     const saved = await this.store.update(comment.annotationId, (current) => ({
       ...current,
@@ -200,10 +213,38 @@ export class ThreadView implements vscode.Disposable {
     this.sync();
   }
 
+  async openDraft(editor: vscode.TextEditor): Promise<void> {
+    const root = this.store.rootUri;
+    const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
+    if (!relative) {
+      void vscode.window.showWarningMessage(
+        "CodeLight only tracks files inside the workspace folder."
+      );
+      return;
+    }
+    const selection = editor.selection;
+    const range = selection.isEmpty
+      ? editor.document.lineAt(selection.active.line).range
+      : new vscode.Range(selection.start, selection.end);
+    const thread = this.controller.createCommentThread(editor.document.uri, range, []);
+    thread.label = "New CodeLight note";
+    thread.contextValue = "codelight";
+    thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    this.pending.add(thread);
+    editor.selection = new vscode.Selection(range.start, range.start);
+    await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
+  }
+
   async open(annotationId: string): Promise<void> {
     const annotation = this.store.byId(annotationId);
     const root = this.store.rootUri;
     if (!annotation || !root) {
+      return;
+    }
+    if (annotation.orphaned === true) {
+      void vscode.window.showWarningMessage(
+        "That highlight lost its text. Remove it instead of commenting on it."
+      );
       return;
     }
     const uri = toUri(root, annotation.file);
@@ -230,6 +271,7 @@ export class ThreadView implements vscode.Disposable {
     this.sync();
     const thread = this.threads.get(annotationId);
     if (!thread) {
+      void vscode.window.showWarningMessage("CodeLight could not open that thread.");
       return;
     }
     const range = this.live.rangeFor(document, annotation);
@@ -257,9 +299,15 @@ export class ThreadView implements vscode.Disposable {
     } catch {
       return undefined;
     }
-    const anchorLine = thread.range ? thread.range.start.line : 0;
-    const line = document.lineAt(Math.min(anchorLine, document.lineCount - 1));
-    const range = line.range.isEmpty ? line.rangeIncludingLineBreak : line.range;
+    const requested = thread.range;
+    let range: vscode.Range;
+    if (requested && !requested.isEmpty) {
+      range = document.validateRange(requested);
+    } else {
+      const anchorLine = requested ? requested.start.line : 0;
+      const line = document.lineAt(Math.min(anchorLine, document.lineCount - 1));
+      range = line.range.isEmpty ? line.rangeIncludingLineBreak : line.range;
+    }
     const text = document.getText();
     const now = timestamp();
     const annotation: Annotation = {
@@ -279,9 +327,13 @@ export class ThreadView implements vscode.Disposable {
       comments: [comment]
     };
     if (!(await this.store.add(annotation))) {
-      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
+      await vscode.env.clipboard.writeText(comment.body).then(undefined, () => undefined);
+      void vscode.window.showWarningMessage(
+        "CodeLight could not save the comment. It was copied to the clipboard."
+      );
       return undefined;
     }
+    this.pending.delete(thread);
     thread.dispose();
     return annotation.id;
   }
@@ -303,7 +355,17 @@ export class ThreadView implements vscode.Disposable {
 
   private fill(thread: vscode.CommentThread, annotation: Annotation): void {
     const me = this.identity.identity?.id;
+    const editing = new Map<string, ThreadComment>();
+    for (const entry of thread.comments) {
+      if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
+        editing.set(entry.commentId, entry);
+      }
+    }
     thread.comments = annotation.comments.map((comment) => {
+      const open = editing.get(comment.id);
+      if (open) {
+        return open;
+      }
       const body = new vscode.MarkdownString(comment.body);
       return new ThreadComment(
         annotation.id,
@@ -346,7 +408,7 @@ export class ThreadView implements vscode.Disposable {
     }
     for (const id of [...this.drafts]) {
       const annotation = this.store.byId(id);
-      if (!annotation || annotation.comments.length > 0) {
+      if (!annotation || annotation.comments.length > 0 || annotation.orphaned === true) {
         this.drafts.delete(id);
       }
     }
@@ -380,6 +442,10 @@ export class ThreadView implements vscode.Disposable {
     for (const thread of this.threads.values()) {
       thread.dispose();
     }
+    for (const thread of this.pending) {
+      thread.dispose();
+    }
+    this.pending.clear();
     this.threads.clear();
     this.owners.clear();
     this.drafts.clear();

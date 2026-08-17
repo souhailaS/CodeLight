@@ -101,7 +101,14 @@ export function activate(context: vscode.ExtensionContext): void {
       const target = await comments.locate();
       if (target !== undefined) {
         await threads.open(target);
+        return;
       }
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        void vscode.window.showWarningMessage("Open a file to comment on.");
+        return;
+      }
+      await threads.openDraft(editor);
     }),
     vscode.commands.registerCommand("codelight.reply", async (target?: unknown) => {
       await ready;

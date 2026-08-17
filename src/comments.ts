@@ -2,12 +2,11 @@ import * as vscode from "vscode";
 import { HighlightCommands } from "./highlights";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
-import { Annotation, Author, Comment } from "./model";
+import { Annotation, Author, Comment, MAX_COMMENT_BODY } from "./model";
 import { toRelativePath } from "./paths";
 import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
 
-const MAX_BODY = 2000;
 const CREATE = "create";
 
 function label(comment: Comment): string {
@@ -24,14 +23,7 @@ export class CommentCommands {
 
   async locate(): Promise<string | undefined> {
     const target = await this.target();
-    if (target === undefined) {
-      return undefined;
-    }
-    if (target !== CREATE) {
-      return target.id;
-    }
-    const created = await this.highlights.add();
-    return created[0]?.id;
+    return target === undefined || target === CREATE ? undefined : target.id;
   }
 
   async add(annotationId?: string): Promise<void> {
@@ -305,7 +297,7 @@ export class CommentCommands {
         if (input.trim() === "") {
           return "A comment cannot be empty.";
         }
-        return input.length > MAX_BODY ? `Keep it under ${MAX_BODY} characters.` : undefined;
+        return input.length > MAX_COMMENT_BODY ? `Keep it under ${MAX_COMMENT_BODY} characters.` : undefined;
       }
     });
     return body === undefined ? undefined : body.trim();
