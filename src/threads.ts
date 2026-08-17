@@ -208,8 +208,9 @@ export class ThreadView implements vscode.Disposable {
     );
   }
 
-  private async confirmClosePending(): Promise<boolean> {
-    if (this.pending.size === 0) {
+  private async confirmCloseNotes(keep?: string): Promise<boolean> {
+    const open = this.pending.size + [...this.drafts].filter((id) => id !== keep).length;
+    if (open === 0) {
       return true;
     }
     const answer = await vscode.window.showWarningMessage(
@@ -221,6 +222,7 @@ export class ThreadView implements vscode.Disposable {
       return false;
     }
     this.closePending();
+    this.closeDrafts(keep);
     return true;
   }
 
@@ -431,10 +433,9 @@ export class ThreadView implements vscode.Disposable {
         "CodeLight comments on one selection at a time. Using the first one."
       );
     }
-    if (!(await this.confirmClosePending())) {
+    if (!(await this.confirmCloseNotes())) {
       return;
     }
-    this.closeDrafts();
     const text = editor.document.getText();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
     thread.label = "New CodeLight note";
@@ -493,10 +494,9 @@ export class ThreadView implements vscode.Disposable {
       );
       return;
     }
-    if (!(await this.confirmClosePending())) {
+    if (!(await this.confirmCloseNotes(annotationId))) {
       return;
     }
-    this.closeDrafts(annotationId);
     if (annotation.comments.length === 0) {
       this.drafts.add(annotationId);
     }
@@ -522,20 +522,29 @@ export class ThreadView implements vscode.Disposable {
     }
     const author = await this.identity.require();
     if (!author) {
+      if (typed !== "" && (await rescue(typed))) {
+        void vscode.window.showInformationMessage(
+          "Your text was copied to the clipboard."
+        );
+      }
       return;
     }
     const created = await this.createAnnotation(thread, undefined, {
       login: author.login,
       id: author.id
     });
-    if (created !== undefined && typed !== "") {
-      const rescued = await rescue(typed);
-      if (rescued) {
-        void vscode.window.showInformationMessage(
-          "Saved the highlight without the comment. Your text was copied to the clipboard."
-        );
-      }
+    if (typed === "") {
+      return;
     }
+    const rescued = await rescue(typed);
+    if (!rescued) {
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      created !== undefined
+        ? "Saved the highlight without the comment. Your text was copied to the clipboard."
+        : "Your text was copied to the clipboard."
+    );
   }
 
   async deleteHighlight(thread?: vscode.CommentThread): Promise<void> {
@@ -633,15 +642,11 @@ export class ThreadView implements vscode.Disposable {
         const end = Math.min(document.getText().length, found.start + width);
         range = new vscode.Range(document.positionAt(found.start), document.positionAt(end));
       } else {
-        const fallback = requested ? document.validateRange(requested) : undefined;
-        if (!fallback || fallback.isEmpty) {
-          const rescued = comment ? await rescue(comment.body) : false;
-          void vscode.window.showWarningMessage(
-            withRescue("The file changed and the selection could not be found again.", rescued)
-          );
-          return undefined;
-        }
-        range = fallback;
+        const rescued = comment ? await rescue(comment.body) : false;
+        void vscode.window.showWarningMessage(
+          withRescue("The file changed and the selection could not be found again.", rescued)
+        );
+        return undefined;
       }
     } else if (requested && !requested.isEmpty) {
       range = document.validateRange(requested);

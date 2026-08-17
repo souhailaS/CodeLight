@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+* Refuse to place a note when the file changed and its text cannot be found again, instead of attaching it to whatever moved into those coordinates.
+* Ask before closing a note you have typed into, including notes opened on an existing highlight.
+* Copy your text to the clipboard on every path where a note is dropped.
+
 ## 0.2.0
 
 Comments now open a real threaded widget in the editor instead of a single line prompt.
