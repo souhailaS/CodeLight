@@ -1,0 +1,43 @@
+{
+  "name": "codelight",
+  "displayName": "CodeLight",
+  "description": "Shared highlights and inline comments that live in .vscode",
+  "version": "0.0.1",
+  "license": "MIT",
+  "publisher": "souhailaS",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/souhailaS/CodeLight.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:.vscode/codelight.json"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codelight.showStatus",
+        "title": "Show Status",
+        "category": "CodeLight"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "node esbuild.mjs --production"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.2",
+    "typescript": "^5.4.5"
+  }
+}
