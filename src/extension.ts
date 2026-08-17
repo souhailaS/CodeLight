@@ -55,9 +55,12 @@ export function activate(context: vscode.ExtensionContext): void {
         await threads.deleteHighlight(thread);
       }
     ),
-    vscode.commands.registerCommand("codelight.threadDiscard", (thread?: vscode.CommentThread) => {
-      threads.discard(thread);
-    }),
+    vscode.commands.registerCommand(
+      "codelight.threadDiscard",
+      async (target?: vscode.CommentReply | vscode.CommentThread) => {
+        await threads.discard(target);
+      }
+    ),
     vscode.commands.registerCommand("codelight.threadEdit", (comment: ThreadComment) => {
       threads.edit(comment);
     }),
