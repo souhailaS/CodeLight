@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { StorageMode } from "./paths";
 import { InlineMode } from "./thread";
 
 export type GutterMode = "always" | "highlights" | "off";
@@ -83,6 +84,11 @@ export function readGutterMode(resource?: vscode.Uri): GutterMode {
 
 export function readGutterMarks(resource?: vscode.Uri): boolean {
   return configuration(resource).get<unknown>("gutterMarks") !== false;
+}
+
+export function readStorageMode(resource?: vscode.Uri): StorageMode {
+  const configured = configuration(resource).get<unknown>("storage");
+  return configured === "compressed" ? "compressed" : "json";
 }
 
 export function resolveColor(palette: readonly PaletteColor[], id: string): PaletteColor {

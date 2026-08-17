@@ -39,7 +39,8 @@
   },
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:.vscode/codelight.json"
+    "workspaceContains:.vscode/codelight.json",
+    "workspaceContains:.vscode/codelight.json.gz"
   ],
   "contributes": {
     "commands": [
@@ -131,6 +132,11 @@
         "title": "Clear Filter",
         "category": "CodeLight",
         "icon": "$(filter-filled)"
+      },
+      {
+        "command": "codelight.convertStorage",
+        "title": "Convert Annotation Storage Format",
+        "category": "CodeLight"
       },
       {
         "command": "codelight.deleteOrphansEverywhere",
@@ -554,6 +560,20 @@
           "type": "boolean",
           "default": true,
           "description": "Show a coloured mark in the gutter beside every highlight."
+        },
+        "codelight.storage": {
+          "type": "string",
+          "default": "json",
+          "scope": "resource",
+          "enum": [
+            "json",
+            "compressed"
+          ],
+          "enumDescriptions": [
+            "Create .vscode/codelight.json, a text file git can diff and merge",
+            "Create .vscode/codelight.json.gz, a smaller binary file git cannot diff or merge"
+          ],
+          "description": "Format used only when CodeLight creates an annotation file that does not exist yet. An existing file keeps its own format until you run the command Convert Annotation Storage Format."
         }
       }
     },

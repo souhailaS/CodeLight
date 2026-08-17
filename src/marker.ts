@@ -11,7 +11,7 @@ import { Visibility } from "./visibility";
 const SETTLE_MS = 600;
 
 interface Marked {
-  id: string;
+  ids: string[];
   uri: string;
 }
 
@@ -152,10 +152,9 @@ export class MarkerMode implements vscode.Disposable {
       const created = await this.highlights.add(color, ranges, editor);
       if (created.length > 0 && this.color && editor === vscode.window.activeTextEditor) {
         await this.dropPrevious(previous, editor, ranges);
-        this.last =
-          this.color && ranges.length === 1
-            ? { id: created[0].id, uri: editor.document.uri.toString() }
-            : undefined;
+        this.last = this.color
+          ? { ids: created.map((annotation) => annotation.id), uri: editor.document.uri.toString() }
+          : undefined;
       }
     } finally {
       this.busy = false;
@@ -168,28 +167,41 @@ export class MarkerMode implements vscode.Disposable {
     editor: vscode.TextEditor,
     ranges: readonly vscode.Range[]
   ): Promise<void> {
-    if (!previous || ranges.length !== 1) {
+    if (!previous || previous.uri !== editor.document.uri.toString()) {
       return;
     }
-    if (previous.uri !== editor.document.uri.toString()) {
-      return;
+    const doomed: string[] = [];
+    for (const id of previous.ids) {
+      const annotation = this.store.byId(id);
+      if (!annotation || annotation.comments.length > 0) {
+        continue;
+      }
+      const live = this.live.rangeFor(editor.document, annotation);
+      if (live.isEmpty) {
+        continue;
+      }
+      const overlaps = ranges.some((range) => {
+        const shared = range.intersection(live);
+        return shared !== undefined && !shared.isEmpty;
+      });
+      if (overlaps) {
+        doomed.push(id);
+      }
     }
-    const annotation = this.store.byId(previous.id);
-    if (!annotation || annotation.comments.length > 0) {
-      return;
-    }
-    const live = this.live.rangeFor(editor.document, annotation);
-    const overlap = ranges[0].intersection(live);
-    if (live.isEmpty || overlap === undefined || overlap.isEmpty) {
+    if (doomed.length === 0) {
       return;
     }
     await this.store.transaction((annotations) => {
-      const current = annotations.get(previous.id);
-      if (!current || current.comments.length > 0) {
-        return false;
+      let changed = false;
+      for (const id of doomed) {
+        const current = annotations.get(id);
+        if (!current || current.comments.length > 0) {
+          continue;
+        }
+        annotations.delete(id);
+        changed = true;
       }
-      annotations.delete(previous.id);
-      return true;
+      return changed;
     });
   }
 

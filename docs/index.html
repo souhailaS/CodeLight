@@ -98,7 +98,7 @@
 
 <h3>Keep them in a layer of their own</h3>
 <p>Plenty of what you want to write down is not meant to ship. A doubt about a function, a reminder to check something later, a question for a colleague tomorrow. Put that in the source and it becomes part of the product and part of everyone's diff, and someone has to remember to take it out again.</p>
-<p>CodeLight keeps those notes beside the code rather than inside it. Commit <code>.vscode/codelight.json</code> and the whole team reads the layer. Add it to your <code>.gitignore</code> and it never leaves your machine, so you can be as blunt as you like while reading and none of it ever reaches the repository.</p>
+<p>CodeLight keeps those notes beside the code rather than inside it. Commit the CodeLight file in <code>.vscode</code>, either <code>codelight.json</code> or <code>codelight.json.gz</code>, and the whole team reads the layer. Add it to your <code>.gitignore</code> and it never leaves your machine, so you can be as blunt as you like while reading and none of it ever reaches the repository.</p>
 </section>
 
 <section id="what">
@@ -131,7 +131,9 @@
   <tr><td><code>codelight.palette</code></td><td>built in</td><td>Colours offered in the picker</td></tr>
   <tr><td><code>codelight.highlightOpacity</code></td><td><code>0.3</code></td><td>Strength of the highlight background</td></tr>
   <tr><td><code>codelight.inlineComments</code></td><td><code>preview</code></td><td>Latest comment, a count, or nothing</td></tr>
+  <tr><td><code>codelight.storage</code></td><td><code>json</code></td><td>Format used when the annotation file is first created, plain or gzipped</td></tr>
 </table>
+<p>If you commit the gzipped store, add <code>*.json.gz binary</code> to your <code>.gitattributes</code> first. A repository that forces <code>* text</code> rewrites line endings on checkout, which corrupts the gzip stream and leaves the store unreadable.</p>
 </section>
 
 <section id="install">
