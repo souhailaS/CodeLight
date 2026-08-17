@@ -208,6 +208,22 @@ export class ThreadView implements vscode.Disposable {
     );
   }
 
+  private async confirmClosePending(): Promise<boolean> {
+    if (this.pending.size === 0) {
+      return true;
+    }
+    const answer = await vscode.window.showWarningMessage(
+      "You already have a note open. Close it and lose anything typed in it?",
+      { modal: true },
+      "Close it"
+    );
+    if (answer !== "Close it") {
+      return false;
+    }
+    this.closePending();
+    return true;
+  }
+
   private closePending(): void {
     for (const thread of this.pending.keys()) {
       thread.dispose();
@@ -415,11 +431,10 @@ export class ThreadView implements vscode.Disposable {
         "CodeLight comments on one selection at a time. Using the first one."
       );
     }
-    if (this.pending.size > 0 || this.drafts.size > 0) {
-      void vscode.window.showInformationMessage("Closed the note you had open.");
-      this.closePending();
-      this.closeDrafts();
+    if (!(await this.confirmClosePending())) {
+      return;
     }
+    this.closeDrafts();
     const text = editor.document.getText();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
     thread.label = "New CodeLight note";
@@ -472,17 +487,16 @@ export class ThreadView implements vscode.Disposable {
       void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
       return;
     }
-    this.closeDrafts(annotationId);
-    if (this.pending.size > 0) {
-      void vscode.window.showInformationMessage("Closed the note you had open.");
-      this.closePending();
-    }
     if (this.live.rangeFor(document, annotation).isEmpty) {
       void vscode.window.showWarningMessage(
         "That highlight lost its text. Remove it instead of commenting on it."
       );
       return;
     }
+    if (!(await this.confirmClosePending())) {
+      return;
+    }
+    this.closeDrafts(annotationId);
     if (annotation.comments.length === 0) {
       this.drafts.add(annotationId);
     }
@@ -618,11 +632,16 @@ export class ThreadView implements vscode.Disposable {
         const width = Math.max(found.end - found.start, draft.length);
         const end = Math.min(document.getText().length, found.start + width);
         range = new vscode.Range(document.positionAt(found.start), document.positionAt(end));
-      } else if (requested && !requested.isEmpty) {
-        range = document.validateRange(requested);
       } else {
-        const line = document.lineAt(Math.min(requested ? requested.start.line : 0, document.lineCount - 1));
-        range = line.range.isEmpty ? line.rangeIncludingLineBreak : line.range;
+        const fallback = requested ? document.validateRange(requested) : undefined;
+        if (!fallback || fallback.isEmpty) {
+          const rescued = comment ? await rescue(comment.body) : false;
+          void vscode.window.showWarningMessage(
+            withRescue("The file changed and the selection could not be found again.", rescued)
+          );
+          return undefined;
+        }
+        range = fallback;
       }
     } else if (requested && !requested.isEmpty) {
       range = document.validateRange(requested);
@@ -731,9 +750,12 @@ export class ThreadView implements vscode.Disposable {
     }
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
-        for (const entry of thread.comments) {
-          if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
-            void this.rescueLostEdit(entry);
+        const gone = this.store.byId(id) === undefined;
+        if (gone) {
+          for (const entry of thread.comments) {
+            if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
+              void this.rescueLostEdit(entry);
+            }
           }
         }
         this.owners.delete(thread);
