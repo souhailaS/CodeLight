@@ -412,9 +412,10 @@ export class ThreadView implements vscode.Disposable {
         "CodeLight comments on one selection at a time. Using the first one."
       );
     }
-    if (this.pending.size > 0) {
+    if (this.pending.size > 0 || this.drafts.size > 0) {
       void vscode.window.showInformationMessage("Closed the note you had open.");
       this.closePending();
+      this.closeDrafts();
     }
     const text = editor.document.getText();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
@@ -430,7 +431,7 @@ export class ThreadView implements vscode.Disposable {
       version: editor.document.version,
       length: editor.document.offsetAt(range.end) - editor.document.offsetAt(range.start)
     });
-    editor.selection = new vscode.Selection(range.start, range.start);
+    editor.selection = new vscode.Selection(range.end, range.end);
     await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
   }
 
@@ -469,7 +470,10 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     this.closeDrafts(annotationId);
-    this.closePending();
+    if (this.pending.size > 0) {
+      void vscode.window.showInformationMessage("Closed the note you had open.");
+      this.closePending();
+    }
     if (this.live.rangeFor(document, annotation).isEmpty) {
       void vscode.window.showWarningMessage(
         "That highlight lost its text. Remove it instead of commenting on it."
@@ -486,7 +490,7 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const range = this.live.rangeFor(document, annotation);
-    editor.selection = new vscode.Selection(range.start, range.start);
+    editor.selection = new vscode.Selection(range.end, range.end);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
@@ -526,14 +530,42 @@ export class ThreadView implements vscode.Disposable {
         return;
       }
     }
-    if (!(await this.store.remove(id))) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+    let ran = false;
+    let found = false;
+    let drifted = false;
+    const saved = await this.store.transaction((annotations) => {
+      ran = true;
+      const current = annotations.get(id);
+      if (!current) {
+        return false;
+      }
+      if (current.comments.length !== count) {
+        drifted = true;
+        return false;
+      }
+      found = true;
+      annotations.delete(id);
+      return true;
+    });
+    if (drifted) {
+      await this.store.refresh();
+      void vscode.window.showWarningMessage(
+        "The comments on that highlight just changed. Try Delete Highlight again to confirm."
+      );
+      return;
+    }
+    if (!saved) {
+      if (ran && !found) {
+        await this.store.refresh();
+      }
+      void vscode.window.showWarningMessage(
+        ran && !found
+          ? "That highlight is no longer in the shared file."
+          : "CodeLight could not update the shared file."
+      );
       return;
     }
     this.drafts.delete(id);
-    this.owners.delete(thread);
-    this.threads.delete(id);
-    thread.dispose();
   }
 
   private async createAnnotation(
@@ -544,8 +576,9 @@ export class ThreadView implements vscode.Disposable {
     const root = this.store.rootUri;
     const relative = root ? toRelativePath(root, thread.uri) : undefined;
     if (!relative) {
+      const rescued = comment ? await rescue(comment.body) : false;
       void vscode.window.showWarningMessage(
-        "CodeLight only tracks files inside the workspace folder."
+        withRescue("CodeLight only tracks files inside the workspace folder.", rescued)
       );
       return undefined;
     }
