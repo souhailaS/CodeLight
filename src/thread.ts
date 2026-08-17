@@ -29,7 +29,7 @@ export function threadMarkdown(annotation: Annotation): vscode.MarkdownString {
   for (const comment of annotation.comments) {
     const when = formatDate(comment.createdAt);
     markdown.appendText(`@${comment.author.login}`);
-    markdown.appendMarkdown(when === "" ? "\n\n" : ` — ${when}\n\n`);
+    markdown.appendMarkdown(when === "" ? "\n\n" : ` · ${when}\n\n`);
     markdown.appendText(comment.body);
     markdown.appendMarkdown("\n\n");
   }

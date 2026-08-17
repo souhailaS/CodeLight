@@ -6,6 +6,7 @@ import { Annotation, Comment } from "./model";
 import { AnnotationStore } from "./store";
 
 const MAX_BODY = 2000;
+const CREATE = "create";
 
 function label(comment: Comment): string {
   const body = comment.body.replace(/\s+/g, " ").trim();
@@ -20,16 +21,16 @@ export class CommentCommands {
   ) {}
 
   async add(annotationId?: string): Promise<void> {
-    const author = await this.identity.require();
-    if (!author) {
-      return;
-    }
-    const annotation = await this.resolve(annotationId);
-    if (!annotation) {
+    const target = await this.target(annotationId);
+    if (target === undefined) {
       return;
     }
     const body = await this.prompt("Add a comment", "");
     if (body === undefined) {
+      return;
+    }
+    const author = await this.identity.require();
+    if (!author) {
       return;
     }
     const now = timestamp();
@@ -40,7 +41,11 @@ export class CommentCommands {
       createdAt: now,
       updatedAt: now
     };
-    const saved = await this.store.update(annotation.id, (current) => ({
+    if (target === CREATE) {
+      await this.highlights.add(comment);
+      return;
+    }
+    const saved = await this.store.update(target.id, (current) => ({
       ...current,
       updatedAt: now,
       comments: [...current.comments, comment]
@@ -51,12 +56,12 @@ export class CommentCommands {
   }
 
   async edit(annotationId?: string): Promise<void> {
-    const author = await this.identity.require();
-    if (!author) {
-      return;
-    }
     const picked = await this.pickComment(annotationId, "Edit comment");
     if (!picked) {
+      return;
+    }
+    const author = await this.identity.require();
+    if (!author) {
       return;
     }
     if (picked.comment.author.id !== author.id) {
@@ -70,25 +75,20 @@ export class CommentCommands {
       return;
     }
     const now = timestamp();
-    const saved = await this.store.update(picked.annotation.id, (current) => ({
-      ...current,
-      updatedAt: now,
-      comments: current.comments.map((entry) =>
+    await this.rewrite(picked, (comments) =>
+      comments.map((entry) =>
         entry.id === picked.comment.id ? { ...entry, body, updatedAt: now } : entry
       )
-    }));
-    if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
-    }
+    );
   }
 
   async remove(annotationId?: string): Promise<void> {
-    const author = await this.identity.require();
-    if (!author) {
-      return;
-    }
     const picked = await this.pickComment(annotationId, "Delete comment");
     if (!picked) {
+      return;
+    }
+    const author = await this.identity.require();
+    if (!author) {
       return;
     }
     if (picked.comment.author.id !== author.id) {
@@ -105,39 +105,86 @@ export class CommentCommands {
     if (confirmed !== "Delete") {
       return;
     }
-    const saved = await this.store.update(picked.annotation.id, (current) => ({
-      ...current,
-      updatedAt: timestamp(),
-      comments: current.comments.filter((entry) => entry.id !== picked.comment.id)
-    }));
+    await this.rewrite(picked, (comments) =>
+      comments.filter((entry) => entry.id !== picked.comment.id)
+    );
+  }
+
+  private async rewrite(
+    picked: { annotation: Annotation; comment: Comment },
+    change: (comments: Comment[]) => Comment[]
+  ): Promise<void> {
+    let found = false;
+    const saved = await this.store.transaction((annotations) => {
+      const current = annotations.get(picked.annotation.id);
+      if (!current || !current.comments.some((entry) => entry.id === picked.comment.id)) {
+        return false;
+      }
+      found = true;
+      annotations.set(picked.annotation.id, {
+        ...current,
+        updatedAt: timestamp(),
+        comments: change(current.comments)
+      });
+      return true;
+    });
+    if (!found) {
+      void vscode.window.showWarningMessage("That comment is no longer in the shared file.");
+      return;
+    }
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not delete the comment.");
+      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
     }
   }
 
-  private async resolve(annotationId?: string): Promise<Annotation | undefined> {
+  private async target(annotationId?: string): Promise<Annotation | typeof CREATE | undefined> {
     if (annotationId !== undefined) {
       const existing = this.store.byId(annotationId);
       if (!existing) {
         void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+        return undefined;
       }
-      return existing;
+      return this.live(existing);
     }
-    if (this.highlights.atCursor().length > 0) {
-      return this.highlights.pickAtCursor("Comment on highlight");
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      void vscode.window.showWarningMessage("Open a file to comment on.");
+      return undefined;
     }
-    const created = await this.highlights.add();
-    return created[0];
+    if (editor.selections.some((selection) => !selection.isEmpty)) {
+      return CREATE;
+    }
+    const candidates = this.highlights.atCursor().filter((entry) => entry.orphaned !== true);
+    if (candidates.length === 0) {
+      return CREATE;
+    }
+    const picked = await this.highlights.pickAtCursor("Comment on highlight");
+    return picked ? this.live(picked) : undefined;
+  }
+
+  private live(annotation: Annotation): Annotation | undefined {
+    if (annotation.orphaned === true) {
+      void vscode.window.showWarningMessage(
+        "That highlight lost its text. Remove it instead of commenting on it."
+      );
+      return undefined;
+    }
+    return annotation;
   }
 
   private async pickComment(
     annotationId: string | undefined,
     title: string
   ): Promise<{ annotation: Annotation; comment: Comment } | undefined> {
-    const annotation =
-      annotationId === undefined
-        ? await this.highlights.pickAtCursor(title)
-        : this.store.byId(annotationId);
+    let annotation: Annotation | undefined;
+    if (annotationId === undefined) {
+      annotation = await this.highlights.pickAtCursor(title);
+    } else {
+      annotation = this.store.byId(annotationId);
+      if (!annotation) {
+        void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      }
+    }
     if (!annotation) {
       return undefined;
     }

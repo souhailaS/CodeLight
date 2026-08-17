@@ -81,8 +81,8 @@
       },
       {
         "command": "codelight.addComment",
-        "key": "ctrl+alt+c",
-        "mac": "cmd+alt+c",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
         "when": "editorTextFocus"
       }
     ],

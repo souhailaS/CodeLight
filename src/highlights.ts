@@ -4,7 +4,7 @@ import { HighlightRenderer } from "./decorations";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
-import { Annotation } from "./model";
+import { Annotation, Comment } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
@@ -53,7 +53,7 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(): Promise<Annotation[]> {
+  async add(initialComment?: Comment): Promise<Annotation[]> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -122,7 +122,7 @@ export class HighlightCommands {
       author: { login: author.login, id: author.id },
       createdAt: now,
       updatedAt: now,
-      comments: []
+      comments: initialComment ? [initialComment] : []
     })) as Annotation[];
     const saved = await this.store.transaction((annotations) => {
       for (const annotation of created) {

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { LiveRanges } from "./live";
+import { Annotation } from "./model";
 import { PaletteColor, readInlineMode, readOpacity, readPalette, resolveColor, toRgba } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
@@ -11,6 +12,7 @@ export class HighlightRenderer implements vscode.Disposable {
   private palette: PaletteColor[] = [];
   private paletteRoot: string | undefined;
   private badge: vscode.TextEditorDecorationType | undefined;
+  private hovers = new Map<string, vscode.MarkdownString>();
   private inline: InlineMode = "preview";
 
   constructor(
@@ -20,6 +22,7 @@ export class HighlightRenderer implements vscode.Disposable {
     this.rebuild();
     this.disposables.push(
       store.onDidChange(() => {
+        this.hovers = new Map();
         if (this.paletteRoot !== this.store.rootUri?.toString()) {
           this.rebuild();
         }
@@ -73,11 +76,12 @@ export class HighlightRenderer implements vscode.Disposable {
         continue;
       }
       const range = this.live.rangeFor(editor.document, annotation, spans);
-      options.push({ range, hoverMessage: threadMarkdown(annotation) });
+      options.push({ range, hoverMessage: this.hover(annotation) });
       const label = inlineLabel(annotation, this.inline);
       if (label !== undefined) {
+        const lineEnd = editor.document.lineAt(range.end.line).range.end;
         badges.push({
-          range: new vscode.Range(range.end, range.end),
+          range: new vscode.Range(lineEnd, lineEnd),
           renderOptions: { after: { contentText: label } }
         });
       }
@@ -91,6 +95,17 @@ export class HighlightRenderer implements vscode.Disposable {
     if (this.badge) {
       editor.setDecorations(this.badge, badges);
     }
+  }
+
+  private hover(annotation: Annotation): vscode.MarkdownString {
+    const key = `${annotation.id}:${annotation.updatedAt}`;
+    const cached = this.hovers.get(key);
+    if (cached) {
+      return cached;
+    }
+    const markdown = threadMarkdown(annotation);
+    this.hovers.set(key, markdown);
+    return markdown;
   }
 
   private renderDocument(document: vscode.TextDocument): void {
