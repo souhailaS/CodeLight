@@ -100,10 +100,7 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   get location(): vscode.Uri | undefined {
-    if (this.active) {
-      return this.active;
-    }
-    return this.root ? storeUri(this.root, readStorageMode(this.root)) : undefined;
+    return this.active;
   }
 
   get rootUri(): vscode.Uri | undefined {
@@ -218,7 +215,16 @@ export class AnnotationStore implements vscode.Disposable {
         );
         return false;
       }
+      const written = await this.readDisk(destination);
+      if (written.status !== "ok" || written.raw !== disk.raw) {
+        await this.discard(destination);
+        this.reportFailure(
+          `CodeLight could not read back ${destination.fsPath}, so ${source.fsPath} is left as it was.`
+        );
+        return false;
+      }
       if (!(await this.discard(source))) {
+        await this.discard(destination);
         return false;
       }
       if (generation !== this.generation) {
@@ -459,7 +465,11 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   private warnAboutDuplicate(duplicate: boolean, files: StoreFiles): void {
-    if (!duplicate || this.reportedDuplicate) {
+    if (!duplicate) {
+      this.reportedDuplicate = false;
+      return;
+    }
+    if (this.reportedDuplicate) {
       return;
     }
     this.reportedDuplicate = true;
