@@ -77,7 +77,7 @@ export class HighlightRenderer implements vscode.Disposable {
       }
       const range = this.live.rangeFor(editor.document, annotation, spans);
       options.push({ range, hoverMessage: this.hover(annotation) });
-      const label = inlineLabel(annotation, this.inline);
+      const label = range.isEmpty ? undefined : inlineLabel(annotation, this.inline);
       if (label !== undefined) {
         const line = labels.get(range.end.line) ?? [];
         line.push(label.trim());

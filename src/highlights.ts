@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { buildAnchor } from "./anchors";
+import { buildAnchor, findAnchor } from "./anchors";
 import { HighlightRenderer } from "./decorations";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
@@ -111,14 +111,29 @@ export class HighlightCommands {
     if (compose && !seed) {
       return [];
     }
+    let placed = ranges;
     if (editor.document.version !== version) {
-      void vscode.window.showWarningMessage(
-        "The file changed while you were typing. Select the text again."
-      );
-      return [];
+      const current = editor.document.getText();
+      const relocated: vscode.Range[] = [];
+      for (const anchor of anchors) {
+        const found = findAnchor(current, anchor);
+        if (!found) {
+          void vscode.window.showWarningMessage(
+            "The file changed while you were typing and the selection could not be found again."
+          );
+          return [];
+        }
+        relocated.push(
+          new vscode.Range(
+            editor.document.positionAt(found.start),
+            editor.document.positionAt(found.end)
+          )
+        );
+      }
+      placed = relocated;
     }
     const now = timestamp();
-    const created = ranges.map((range, index) => ({
+    const created = placed.map((range, index) => ({
       id: newId(),
       file: relative,
       range: {
@@ -166,6 +181,14 @@ export class HighlightCommands {
       const range = this.live.rangeFor(editor.document, annotation, spans);
       return range.isEmpty ? range.start.line === position.line : range.contains(position);
     });
+  }
+
+  isCollapsed(annotation: Annotation): boolean {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      return annotation.orphaned === true;
+    }
+    return this.live.rangeFor(editor.document, annotation).isEmpty;
   }
 
   enclosing(selection: vscode.Selection): Annotation[] {

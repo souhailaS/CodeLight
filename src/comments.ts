@@ -216,7 +216,9 @@ export class CommentCommands {
           : await this.highlights.pickAtCursor("Comment on highlight", enclosing);
       return picked ? this.live(picked) : undefined;
     }
-    const candidates = this.highlights.atCursor().filter((entry) => entry.orphaned !== true);
+    const candidates = this.highlights
+      .atCursor()
+      .filter((entry) => entry.orphaned !== true && !this.highlights.isCollapsed(entry));
     if (candidates.length === 0) {
       return CREATE;
     }
@@ -225,7 +227,7 @@ export class CommentCommands {
   }
 
   private live(annotation: Annotation): Annotation | undefined {
-    if (annotation.orphaned === true) {
+    if (annotation.orphaned === true || this.highlights.isCollapsed(annotation)) {
       void vscode.window.showWarningMessage(
         "That highlight lost its text. Remove it instead of commenting on it."
       );

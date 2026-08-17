@@ -3,6 +3,7 @@ import { Annotation } from "./model";
 
 const TRUSTED_COMMANDS = ["codelight.reply", "codelight.editComment", "codelight.deleteComment"];
 const PREVIEW_LENGTH = 40;
+const LINKABLE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 
 export type InlineMode = "off" | "count" | "preview";
 
@@ -34,6 +35,9 @@ export function threadMarkdown(annotation: Annotation): vscode.MarkdownString {
     markdown.appendMarkdown(when === "" ? "\n\n" : ` · ${when}\n\n`);
     markdown.appendText(comment.body);
     markdown.appendMarkdown("\n\n");
+  }
+  if (!LINKABLE_ID.test(annotation.id)) {
+    return markdown;
   }
   const actions = [commandLink("codelight.reply", annotation.id, "Reply")];
   if (annotation.comments.length > 0) {

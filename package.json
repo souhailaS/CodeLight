@@ -75,13 +75,13 @@
     "keybindings": [
       {
         "command": "codelight.addHighlight",
-        "key": "ctrl+alt+k",
+        "key": "ctrl+k ctrl+h",
         "mac": "cmd+alt+k",
         "when": "editorTextFocus"
       },
       {
         "command": "codelight.addComment",
-        "key": "ctrl+alt+m",
+        "key": "ctrl+k ctrl+m",
         "mac": "cmd+alt+m",
         "when": "editorTextFocus"
       }
