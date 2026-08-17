@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity, visibility);
   const tree = new AnnotationTree(store);
-  const panel = new PanelCommands(store, live, tree);
+  const panel = new PanelCommands(store, live, tree, visibility);
   const view = vscode.window.createTreeView("codelight.annotations", {
     treeDataProvider: tree,
     showCollapseAll: true
@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
       visibility.toggle();
     }),
     vscode.commands.registerCommand("codelight.showAgain", () => {
-      visibility.toggle();
+      visibility.show();
     }),
     vscode.commands.registerCommand("codelight.markerOn", async () => {
       await ready;

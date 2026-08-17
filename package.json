@@ -323,27 +323,27 @@
         {
           "command": "codelight.markerOn",
           "group": "navigation@7",
-          "when": "editorLangId && !codelight.marker"
+          "when": "resourceLangId && !codelight.marker"
         },
         {
           "command": "codelight.markerOff",
           "group": "navigation@7",
-          "when": "editorLangId && codelight.marker"
+          "when": "resourceLangId && codelight.marker"
         },
         {
           "command": "codelight.addComment",
           "group": "navigation@8",
-          "when": "editorLangId"
+          "when": "resourceLangId"
         },
         {
           "command": "codelight.toggleVisibility",
           "group": "navigation@9",
-          "when": "editorLangId && !codelight.hidden"
+          "when": "resourceLangId && !codelight.hidden"
         },
         {
           "command": "codelight.showAgain",
           "group": "navigation@9",
-          "when": "editorLangId && codelight.hidden"
+          "when": "resourceLangId && codelight.hidden"
         }
       ],
       "view/title": [

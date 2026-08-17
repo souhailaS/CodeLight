@@ -85,7 +85,6 @@ export class ThreadView implements vscode.Disposable {
     );
     this.disposables.push(
       visibility.onDidChange((shown) => {
-        const open = this.threads.size;
         this.controller.commentingRangeProvider = this.rangeProvider();
         this.sync();
         if (shown) {
@@ -93,11 +92,6 @@ export class ThreadView implements vscode.Disposable {
         }
         if (this.pending.size > 0) {
           void vscode.window.showInformationMessage("The note you are writing stays open.");
-        }
-        if (open > 0) {
-          void vscode.window.showInformationMessage(
-            "Comment threads were closed. Anything typed into a reply box was not kept."
-          );
         }
       })
     );
@@ -159,6 +153,7 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async reply(reply: vscode.CommentReply): Promise<void> {
+    this.visibility.show();
     const owned = this.owners.get(reply.thread);
     const body = reply.text.trim();
     if (body === "") {
@@ -889,6 +884,11 @@ export class ThreadView implements vscode.Disposable {
   }
 
   dispose(): void {
+    if (this.lostTimer) {
+      clearTimeout(this.lostTimer);
+      this.lostTimer = undefined;
+    }
+    this.lost.length = 0;
     for (const thread of this.threads.values()) {
       thread.dispose();
     }

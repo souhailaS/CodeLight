@@ -133,10 +133,13 @@ export class MarkerMode implements vscode.Disposable {
     }
     const previous = this.last;
     const relative = this.relativePath(editor);
-    if (relative && ranges.every((range) => this.highlights.alreadyMarked(editor, relative, range))) {
-      this.last = undefined;
-      this.catchUp(editor, ranges);
-      return;
+    if (relative) {
+      const taken = this.highlights.markedRanges(editor, relative);
+      if (ranges.every((range) => taken.some((existing) => existing.isEqual(range)))) {
+        this.last = undefined;
+        this.catchUp(editor, ranges);
+        return;
+      }
     }
     this.busy = true;
     try {

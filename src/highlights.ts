@@ -73,6 +73,7 @@ export class HighlightCommands {
     const ranges: vscode.Range[] = [];
     let skipped = 0;
     const sources = only ?? editor.selections;
+    const taken = this.markedRanges(editor, relative);
     for (const selection of sources) {
       const range = selection.isEmpty
         ? editor.document.lineAt(selection.start.line).range
@@ -80,7 +81,7 @@ export class HighlightCommands {
       if (range.isEmpty || ranges.some((existing) => existing.isEqual(range))) {
         continue;
       }
-      if (this.alreadyMarked(editor, relative, range)) {
+      if (taken.some((existing) => existing.isEqual(range))) {
         skipped += 1;
         continue;
       }
@@ -186,14 +187,16 @@ export class HighlightCommands {
     });
   }
 
-  alreadyMarked(editor: vscode.TextEditor, relative: string, range: vscode.Range): boolean {
+  markedRanges(editor: vscode.TextEditor, relative: string): vscode.Range[] {
     const spans = this.live.spansFor(editor.document);
-    return this.store.forFile(relative).some((annotation) => {
+    const taken: vscode.Range[] = [];
+    for (const annotation of this.store.forFile(relative)) {
       if (annotation.orphaned === true) {
-        return false;
+        continue;
       }
-      return this.live.rangeFor(editor.document, annotation, spans).isEqual(range);
-    });
+      taken.push(this.live.rangeFor(editor.document, annotation, spans));
+    }
+    return taken;
   }
 
   isCollapsed(annotation: Annotation): boolean {
