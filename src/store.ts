@@ -4,6 +4,11 @@ import { resolveRoot, storeUri } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
 
+type DiskState =
+  | { status: "ok"; annotations: Map<string, Annotation>; raw: string; dropped: number }
+  | { status: "missing" }
+  | { status: "error"; message: string };
+
 function isMissingFile(error: unknown): boolean {
   if (error instanceof vscode.FileSystemError) {
     return error.code === "FileNotFound";
@@ -22,13 +27,11 @@ export class AnnotationStore implements vscode.Disposable {
   private root: vscode.Uri | undefined;
   private watcher: vscode.FileSystemWatcher | undefined;
   private reloadTimer: ReturnType<typeof setTimeout> | undefined;
-  private pendingWrite: Promise<void> = Promise.resolve();
+  private queue: Promise<void> = Promise.resolve();
   private lastSerialized: string | undefined;
   private reportedFailure: string | undefined;
   private reportedDropped = 0;
   private generation = 0;
-  private writeCount = 0;
-  private blocked = false;
 
   readonly onDidChange = this.emitter.event;
 
@@ -73,65 +76,108 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async add(annotation: Annotation): Promise<boolean> {
-    await this.flushPendingReload();
-    if (!this.canWrite()) {
-      return false;
-    }
-    this.annotations.set(annotation.id, annotation);
-    await this.persist();
-    return true;
+    return this.commit((annotations) => {
+      annotations.set(annotation.id, annotation);
+      return true;
+    });
   }
 
   async update(id: string, mutate: (annotation: Annotation) => Annotation): Promise<boolean> {
-    await this.flushPendingReload();
-    const existing = this.annotations.get(id);
-    if (!existing || !this.canWrite()) {
-      return false;
-    }
-    this.annotations.set(id, mutate(existing));
-    await this.persist();
-    return true;
+    return this.commit((annotations) => {
+      const existing = annotations.get(id);
+      if (!existing) {
+        return false;
+      }
+      annotations.set(id, mutate(existing));
+      return true;
+    });
   }
 
   async remove(id: string): Promise<boolean> {
-    await this.flushPendingReload();
-    if (!this.annotations.has(id) || !this.canWrite()) {
-      return false;
-    }
-    this.annotations.delete(id);
-    await this.persist();
-    return true;
+    return this.commit((annotations) => annotations.delete(id));
   }
 
-  private async flushPendingReload(): Promise<void> {
-    if (!this.reloadTimer) {
-      return;
-    }
-    clearTimeout(this.reloadTimer);
-    this.reloadTimer = undefined;
-    await this.load();
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task, task);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
-  private canWrite(): boolean {
-    if (!this.isReady) {
+  private async commit(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
+    const target = this.location;
+    if (!target) {
       return false;
     }
-    if (this.blocked) {
-      void vscode.window.showErrorMessage(
-        "CodeLight will not save while .vscode/codelight.json cannot be read. Fix the file, then reload the window."
-      );
-      return false;
+    const generation = this.generation;
+    return this.enqueue(async () => {
+      if (generation !== this.generation) {
+        return false;
+      }
+      const disk = await this.readDisk(target);
+      if (generation !== this.generation) {
+        return false;
+      }
+      if (disk.status === "error") {
+        this.reportFailure(disk.message);
+        return false;
+      }
+      const annotations = disk.status === "ok" ? disk.annotations : new Map<string, Annotation>();
+      if (!apply(annotations)) {
+        return false;
+      }
+      const content = serializeStore([...annotations.values()]);
+      try {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
+        await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
+      } catch (error) {
+        this.reportFailure(`CodeLight could not save annotations. ${describe(error)}`);
+        this.scheduleReload();
+        return false;
+      }
+      if (generation !== this.generation) {
+        return true;
+      }
+      this.annotations = annotations;
+      this.lastSerialized = content;
+      this.reportedFailure = undefined;
+      this.emitter.fire();
+      return true;
+    });
+  }
+
+  private async readDisk(target: vscode.Uri): Promise<DiskState> {
+    let raw: string;
+    try {
+      const bytes = await vscode.workspace.fs.readFile(target);
+      raw = Buffer.from(bytes).toString("utf8");
+    } catch (error) {
+      if (isMissingFile(error)) {
+        return { status: "missing" };
+      }
+      return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
     }
-    return true;
+    try {
+      const parsed = parseStore(raw);
+      return {
+        status: "ok",
+        raw,
+        dropped: parsed.dropped,
+        annotations: new Map(parsed.annotations.map((entry) => [entry.id, entry]))
+      };
+    } catch (error) {
+      return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
+    }
   }
 
   private async bind(): Promise<void> {
-    const root = await resolveRoot();
+    const root = await resolveRoot(this.root);
     if (this.root?.toString() === root?.toString()) {
       return;
     }
     this.generation += 1;
-    this.blocked = false;
     if (this.reloadTimer) {
       clearTimeout(this.reloadTimer);
       this.reloadTimer = undefined;
@@ -172,50 +218,39 @@ export class AnnotationStore implements vscode.Disposable {
       return;
     }
     const generation = this.generation;
-    const writes = this.writeCount;
-    let raw: string;
-    try {
-      const bytes = await vscode.workspace.fs.readFile(target);
-      if (generation !== this.generation || writes !== this.writeCount) {
+    await this.enqueue(async () => {
+      if (generation !== this.generation) {
         return;
       }
-      raw = Buffer.from(bytes).toString("utf8");
-    } catch (error) {
-      if (generation !== this.generation || writes !== this.writeCount) {
+      const disk = await this.readDisk(target);
+      if (generation !== this.generation) {
         return;
       }
-      if (!isMissingFile(error)) {
-        this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
+      if (disk.status === "error") {
+        this.reportFailure(disk.message);
         return;
       }
-      this.blocked = false;
-      if (this.annotations.size === 0 && this.lastSerialized === undefined) {
-        return;
-      }
-      this.annotations = new Map();
-      this.lastSerialized = undefined;
-      this.emitter.fire();
-      return;
-    }
-    this.blocked = false;
-    if (raw === this.lastSerialized) {
-      return;
-    }
-    try {
-      const parsed = parseStore(raw);
-      this.annotations = new Map(parsed.annotations.map((entry) => [entry.id, entry]));
-      this.lastSerialized = raw;
       this.reportedFailure = undefined;
-      this.blocked = false;
-      this.warnAboutDropped(parsed.dropped, target);
+      if (disk.status === "missing") {
+        if (this.annotations.size === 0 && this.lastSerialized === undefined) {
+          return;
+        }
+        this.annotations = new Map();
+        this.lastSerialized = undefined;
+        this.emitter.fire();
+        return;
+      }
+      if (disk.raw === this.lastSerialized) {
+        return;
+      }
+      this.annotations = disk.annotations;
+      this.lastSerialized = disk.raw;
+      this.warnAboutDropped(disk.dropped, target);
       this.emitter.fire();
-    } catch (error) {
-      this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
-    }
+    });
   }
 
   private reportFailure(message: string): void {
-    this.blocked = true;
     if (this.reportedFailure === message) {
       return;
     }
@@ -235,34 +270,6 @@ export class AnnotationStore implements vscode.Disposable {
     void vscode.window.showWarningMessage(
       `CodeLight skipped ${dropped} unreadable ${label} in ${target.fsPath}. They are left in the file until you save a change.`
     );
-  }
-
-  private async persist(): Promise<void> {
-    const target = this.location;
-    if (!target) {
-      return;
-    }
-    const content = serializeStore(this.all);
-    const generation = this.generation;
-    this.writeCount += 1;
-    this.emitter.fire();
-    this.pendingWrite = this.pendingWrite.then(async () => {
-      try {
-        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
-        await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
-        if (generation === this.generation) {
-          this.lastSerialized = content;
-        }
-      } catch (error) {
-        if (generation === this.generation) {
-          this.lastSerialized = undefined;
-          this.blocked = true;
-          this.scheduleReload();
-        }
-        void vscode.window.showErrorMessage(`CodeLight could not save annotations. ${describe(error)}`);
-      }
-    });
-    await this.pendingWrite;
   }
 
   dispose(): void {

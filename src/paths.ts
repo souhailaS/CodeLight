@@ -7,7 +7,7 @@ export function storeUri(root: vscode.Uri): vscode.Uri {
   return vscode.Uri.joinPath(root, ".vscode", "codelight.json");
 }
 
-export async function resolveRoot(): Promise<vscode.Uri | undefined> {
+export async function resolveRoot(preferred?: vscode.Uri): Promise<vscode.Uri | undefined> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     return undefined;
@@ -20,7 +20,10 @@ export async function resolveRoot(): Promise<vscode.Uri | undefined> {
       continue;
     }
   }
-  return folders[0].uri;
+  const stillOpen = preferred
+    ? folders.find((folder) => folder.uri.toString() === preferred.toString())
+    : undefined;
+  return stillOpen ? stillOpen.uri : folders[0].uri;
 }
 
 function comparable(value: string): string {
@@ -35,7 +38,8 @@ export function toRelativePath(root: vscode.Uri, target: vscode.Uri): string | u
   if (comparable(target.path.slice(0, rootPath.length)) !== comparable(rootPath)) {
     return undefined;
   }
-  return target.path.slice(rootPath.length);
+  const relative = target.path.slice(rootPath.length);
+  return isSafeRelativePath(relative) ? relative : undefined;
 }
 
 export function toUri(root: vscode.Uri, relativePath: string): vscode.Uri | undefined {

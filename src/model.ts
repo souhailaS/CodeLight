@@ -126,7 +126,11 @@ export function isSafeRelativePath(candidate: string): boolean {
   return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
 }
 
-function parseAnnotation(value: unknown): Annotation | undefined {
+interface DropCounter {
+  count: number;
+}
+
+function parseAnnotation(value: unknown, dropped: DropCounter): Annotation | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -138,6 +142,17 @@ function parseAnnotation(value: unknown): Annotation | undefined {
   }
   const createdAt = readString(value.createdAt);
   const rawComments = Array.isArray(value.comments) ? value.comments : [];
+  const seenComments = new Set<string>();
+  const comments: Comment[] = [];
+  for (const entry of rawComments) {
+    const comment = parseComment(entry);
+    if (!comment || seenComments.has(comment.id)) {
+      dropped.count += 1;
+      continue;
+    }
+    seenComments.add(comment.id);
+    comments.push(comment);
+  }
   return {
     id,
     file,
@@ -147,9 +162,7 @@ function parseAnnotation(value: unknown): Annotation | undefined {
     author,
     createdAt,
     updatedAt: readString(value.updatedAt, createdAt),
-    comments: rawComments
-      .map(parseComment)
-      .filter((comment): comment is Comment => comment !== undefined)
+    comments
   };
 }
 
@@ -176,17 +189,17 @@ export function parseStore(raw: string): ParsedStore {
   const rawAnnotations = Array.isArray(parsed.annotations) ? parsed.annotations : [];
   const seen = new Set<string>();
   const annotations: Annotation[] = [];
-  let dropped = 0;
+  const dropped: DropCounter = { count: 0 };
   for (const entry of rawAnnotations) {
-    const annotation = parseAnnotation(entry);
+    const annotation = parseAnnotation(entry, dropped);
     if (!annotation || seen.has(annotation.id)) {
-      dropped += 1;
+      dropped.count += 1;
       continue;
     }
     seen.add(annotation.id);
     annotations.push(annotation);
   }
-  return { annotations, dropped };
+  return { annotations, dropped: dropped.count };
 }
 
 export function sortAnnotations(annotations: readonly Annotation[]): Annotation[] {
