@@ -1,10 +1,9 @@
 import * as vscode from "vscode";
 import { HighlightCommands } from "./highlights";
-import { newId, timestamp } from "./ids";
+import { timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
-import { Annotation, Author, Comment, MAX_COMMENT_BODY } from "./model";
+import { Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { toRelativePath } from "./paths";
-import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
 
 const CREATE = "create";
@@ -29,82 +28,6 @@ export class CommentCommands {
       return { kind: "abort" };
     }
     return target === CREATE ? { kind: "draft" } : { kind: "open", id: target.id };
-  }
-
-  async add(annotationId?: string): Promise<void> {
-    const target = await this.target(annotationId);
-    if (target === undefined) {
-      return;
-    }
-    if (target === CREATE) {
-      await this.highlights.add((author) => this.compose(author));
-      return;
-    }
-    const author = await this.identity.require();
-    if (!author) {
-      return;
-    }
-    const comment = await this.compose({ login: author.login, id: author.id });
-    if (!comment) {
-      return;
-    }
-    const now = comment.createdAt;
-    let ran = false;
-    let found = false;
-    let lost = false;
-    const saved = await this.store.transaction((annotations) => {
-      ran = true;
-      const current = annotations.get(target.id);
-      if (!current) {
-        return false;
-      }
-      if (current.orphaned === true) {
-        lost = true;
-        return false;
-      }
-      found = true;
-      annotations.set(target.id, {
-        ...current,
-        updatedAt: now,
-        comments: [...current.comments, comment]
-      });
-      return true;
-    });
-    if (ran && found && saved) {
-      return;
-    }
-    const rescued = await rescue(comment.body);
-    if (!ran) {
-      void vscode.window.showWarningMessage(
-        withRescue("CodeLight could not update the shared file.", rescued)
-      );
-      return;
-    }
-    if (lost) {
-      void vscode.window.showWarningMessage(
-        withRescue("That highlight lost its text while you were typing.", rescued)
-      );
-      return;
-    }
-    if (!found) {
-      await this.store.refresh();
-      void vscode.window.showWarningMessage(
-        withRescue("That highlight is no longer in the shared file.", rescued)
-      );
-      return;
-    }
-    void vscode.window.showWarningMessage(
-      withRescue("CodeLight could not save the comment.", rescued)
-    );
-  }
-
-  private async compose(author: Author): Promise<Comment | undefined> {
-    const body = await this.prompt("Add a comment", "");
-    if (body === undefined) {
-      return undefined;
-    }
-    const now = timestamp();
-    return { id: newId(), author, body, createdAt: now, updatedAt: now };
   }
 
   async edit(annotationId?: string): Promise<void> {

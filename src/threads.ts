@@ -4,7 +4,7 @@ import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
 import { Annotation, Comment, MAX_COMMENT_BODY } from "./model";
-import { DEFAULT_PALETTE } from "./palette";
+import { readPalette } from "./palette";
 import { toRelativePath, toUri } from "./paths";
 import { AnnotationStore } from "./store";
 
@@ -106,6 +106,13 @@ export class ThreadView implements vscode.Disposable {
       updatedAt: now
     };
     const owned = this.owners.get(reply.thread);
+    if (owned !== undefined && this.store.byId(owned)?.orphaned === true) {
+      await vscode.env.clipboard.writeText(body).then(undefined, () => undefined);
+      void vscode.window.showWarningMessage(
+        "That highlight lost its text, so the comment was not saved. It was copied to the clipboard."
+      );
+      return;
+    }
     const annotationId = owned ?? (await this.createAnnotation(reply.thread, comment));
     if (annotationId === undefined) {
       return;
@@ -137,16 +144,28 @@ export class ThreadView implements vscode.Disposable {
     this.sync();
   }
 
-  discardDraft(thread?: vscode.CommentThread): void {
-    if (thread && this.pending.has(thread)) {
+  discard(thread?: vscode.CommentThread): void {
+    if (!thread) {
+      for (const entry of this.pending) {
+        entry.dispose();
+      }
+      this.pending.clear();
+      return;
+    }
+    if (this.pending.has(thread)) {
       this.pending.delete(thread);
       thread.dispose();
       return;
     }
-    for (const entry of this.pending) {
-      entry.dispose();
+    const owned = this.owners.get(thread);
+    if (owned !== undefined && thread.comments.length === 0) {
+      this.drafts.delete(owned);
+      this.owners.delete(thread);
+      this.threads.delete(owned);
+      thread.dispose();
+      return;
     }
-    this.pending.clear();
+    thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
   }
 
   edit(comment: ThreadComment): void {
@@ -258,6 +277,11 @@ export class ThreadView implements vscode.Disposable {
       );
       return;
     }
+    if (editor.selections.length > 1) {
+      void vscode.window.showInformationMessage(
+        "CodeLight comments on one selection at a time. Using the first one."
+      );
+    }
     for (const entry of this.pending) {
       entry.dispose();
     }
@@ -356,7 +380,7 @@ export class ThreadView implements vscode.Disposable {
         endCharacter: range.end.character
       },
       anchor: buildAnchor(text, document.offsetAt(range.start), document.offsetAt(range.end)),
-      color: DEFAULT_PALETTE[0].id,
+      color: readPalette(root)[0].id,
       author: comment.author,
       createdAt: now,
       updatedAt: now,

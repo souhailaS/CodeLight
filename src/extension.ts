@@ -36,6 +36,9 @@ export function activate(context: vscode.ExtensionContext): void {
       await ready;
       await threads.reply(reply);
     }),
+    vscode.commands.registerCommand("codelight.threadDiscard", (thread?: vscode.CommentThread) => {
+      threads.discard(thread);
+    }),
     vscode.commands.registerCommand("codelight.threadEdit", (comment: ThreadComment) => {
       threads.edit(comment);
     }),
@@ -123,6 +126,13 @@ export function activate(context: vscode.ExtensionContext): void {
       const located = await comments.locate();
       if (located.kind === "open") {
         await threads.open(located.id);
+        return;
+      }
+      if (located.kind === "draft") {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+          await threads.openDraft(editor);
+        }
       }
     }),
     vscode.commands.registerCommand("codelight.editComment", async (target?: unknown) => {

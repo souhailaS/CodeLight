@@ -139,6 +139,12 @@
         "title": "Delete",
         "category": "CodeLight",
         "icon": "$(trash)"
+      },
+      {
+        "command": "codelight.threadDiscard",
+        "title": "Discard",
+        "category": "CodeLight",
+        "icon": "$(close)"
       }
     ],
     "keybindings": [
@@ -195,6 +201,10 @@
         },
         {
           "command": "codelight.threadDelete",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadDiscard",
           "when": "false"
         }
       ],
@@ -284,6 +294,13 @@
         {
           "command": "codelight.threadSave",
           "group": "inline@2",
+          "when": "commentController == codelight"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "codelight.threadDiscard",
+          "group": "inline@1",
           "when": "commentController == codelight"
         }
       ]
