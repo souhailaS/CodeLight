@@ -8,6 +8,7 @@ import { exists, isMissingFile, resolveRoot, STORE_PATTERN, storeUri } from "./p
 
 const RELOAD_DEBOUNCE_MS = 150;
 const MAX_STORE_BYTES = 64 * 1024 * 1024;
+const LIMIT_MB = MAX_STORE_BYTES / 1024 / 1024;
 
 const compress = promisify(gzip);
 const decompress = promisify(gunzip);
@@ -34,6 +35,8 @@ type Choice =
   | { status: "ok"; target: vscode.Uri; duplicate: boolean }
   | { status: "error"; message: string };
 
+type Presence = { status: "ok"; present: boolean } | { status: "error"; message: string };
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -57,17 +60,18 @@ function temporaryName(): string {
   return `codelight.write-${newId()}.tmp`;
 }
 
+function tooLarge(content: string, target: vscode.Uri): boolean {
+  return isCompressed(target) && Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES;
+}
+
 async function encodeStore(content: string, target: vscode.Uri): Promise<Buffer> {
-  const buffer = Buffer.from(content, "utf8");
-  if (!isCompressed(target)) {
-    return buffer;
-  }
-  if (buffer.length > MAX_STORE_BYTES) {
+  if (tooLarge(content, target)) {
     throw new Error(
-      `The store is larger than the ${MAX_STORE_BYTES / 1024 / 1024} MB limit for compressed storage. Convert it to the plain format with the command Convert Annotation Storage Format.`
+      `The store is larger than the ${LIMIT_MB} MB limit for compressed storage. Convert it to the plain format with the command Convert Annotation Storage Format.`
     );
   }
-  return compress(buffer);
+  const buffer = Buffer.from(content, "utf8");
+  return isCompressed(target) ? compress(buffer) : buffer;
 }
 
 export class AnnotationStore implements vscode.Disposable {
@@ -230,6 +234,12 @@ export class AnnotationStore implements vscode.Disposable {
         );
         return false;
       }
+      if (tooLarge(disk.raw, destination)) {
+        this.reportFailure(
+          `CodeLight could not convert ${source.fsPath}. The store is larger than the ${LIMIT_MB} MB limit for compressed storage, so it is too large to compress.`
+        );
+        return false;
+      }
       try {
         await this.writeStore(destination, disk.raw);
       } catch (error) {
@@ -284,35 +294,38 @@ export class AnnotationStore implements vscode.Disposable {
     };
   }
 
+  private async inspect(target: vscode.Uri): Promise<Presence> {
+    try {
+      return { status: "ok", present: await exists(target) };
+    } catch (error) {
+      return { status: "error", message: `CodeLight could not check ${target.fsPath}. ${describe(error)}` };
+    }
+  }
+
   private async pick(files: StoreFiles): Promise<Choice> {
-    let hasPlain = false;
-    let hasCompressed = false;
-    try {
-      hasPlain = await exists(files.plain);
-    } catch (error) {
-      return { status: "error", message: `CodeLight could not check ${files.plain.fsPath}. ${describe(error)}` };
-    }
-    try {
-      hasCompressed = await exists(files.compressed);
-    } catch (error) {
-      return {
-        status: "error",
-        message: `CodeLight could not check ${files.compressed.fsPath}. ${describe(error)}`
-      };
-    }
-    if (hasCompressed && hasPlain) {
-      if (this.active?.toString() === files.plain.toString()) {
-        return { status: "ok", target: files.plain, duplicate: true };
-      }
-      return { status: "ok", target: files.compressed, duplicate: true };
+    const plain = await this.inspect(files.plain);
+    const compressed = await this.inspect(files.compressed);
+    const hasPlain = plain.status === "ok" && plain.present;
+    const hasCompressed = compressed.status === "ok" && compressed.present;
+    if (hasPlain && this.active?.toString() === files.plain.toString()) {
+      return { status: "ok", target: files.plain, duplicate: hasCompressed };
     }
     if (hasCompressed) {
-      return { status: "ok", target: files.compressed, duplicate: false };
+      return { status: "ok", target: files.compressed, duplicate: hasPlain };
     }
     if (hasPlain) {
       return { status: "ok", target: files.plain, duplicate: false };
     }
-    return { status: "ok", target: this.active ?? files.fresh, duplicate: false };
+    if (this.active) {
+      return { status: "ok", target: this.active, duplicate: false };
+    }
+    if (plain.status === "error") {
+      return { status: "error", message: plain.message };
+    }
+    if (compressed.status === "error") {
+      return { status: "error", message: compressed.message };
+    }
+    return { status: "ok", target: files.fresh, duplicate: false };
   }
 
   private async commit(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
