@@ -6,17 +6,15 @@ Shared highlights and comments for VS Code, kept beside your code instead of ins
 
 ## Why
 
-VS Code stopped being only a code editor a long time ago. People draft documents in it, read specifications in it, and work through unfamiliar repositories in it, and almost all of that time is spent reading rather than typing.
+**We read more than we write.** VS Code stopped being only a code editor long ago. People draft documents in it, read specifications in it, and work through unfamiliar repositories in it.
 
-That balance tipped further once code started arriving generated, with its comments already written. The typing is increasingly done for us, so what is left is reading, deciding whether what came back is right, and saying what should happen next. We now spend relatively more time reading code than writing it.
+**Generated code tipped the balance.** Code now arrives written, with its comments already attached. The typing is increasingly done for us, so what is left is reading it and deciding whether it is right.
 
-Generated comments explain what the code does. They say nothing about what you noticed while reading it, what looked wrong, or what you wanted a colleague to confirm.
+**Generated comments say the wrong things.** They explain what the code does. They say nothing about what you noticed, what looked wrong, or what you wanted a colleague to confirm.
 
-Reading notes have nowhere good to live today. Put them in the source and they become part of the product, they show up in everyone's diff, and someone has to remember to take them out. Put them in a pull request and they are trapped in a branch that may sit unmerged for weeks, invisible to anyone not reviewing it, and gone the moment the branch is.
+**Those notes have nowhere to go.** Put them in the source and they become part of the product and part of everyone's diff. Put them in a pull request and they sit in a branch that may never merge, invisible to anyone not reviewing it.
 
-CodeLight makes commenting a layer of its own. Highlight anything, attach a note, and share it with your team through the repository you already share, without touching a single line of code.
-
-And when a note should never reach the repository at all, it does not have to. Add `.vscode/codelight.json` to your `.gitignore` and every highlight and comment stays on your machine, private to you, while still sitting exactly where the code is. Nothing you jot down while reading has to become someone else's diff.
+**So make commenting its own layer.** Highlight anything, attach a note, and share it through the repository you already share, without touching a line of code. Or keep it to yourself. Add `.vscode/codelight.json` to your `.gitignore` and nothing you jot down while reading ever becomes someone else's diff.
 
 ## What it does
 
