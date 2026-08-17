@@ -237,6 +237,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   private view: vscode.WebviewView | undefined;
   private nonce = createNonce();
   private tracked: vscode.TextEditor | undefined;
+  private loaded = false;
   private shown: string | undefined;
   private sent: string | undefined;
   private spansKey: string | undefined;
@@ -257,6 +258,14 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
         this.scheduleShift(document);
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.render()),
+      vscode.workspace.onDidCloseTextDocument((document) => {
+        if (this.tracked?.document !== document) {
+          return;
+        }
+        this.tracked = undefined;
+        this.forgetSpans();
+        this.render();
+      }),
       vscode.window.onDidChangeVisibleTextEditors(() => {
         this.forgetSpans();
         this.render();
@@ -282,7 +291,8 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     view.webview.html = this.shell(view.webview);
   }
 
-  refresh(): void {
+  ready(): void {
+    this.loaded = true;
     this.render();
   }
 
@@ -412,6 +422,9 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private content(editor: vscode.TextEditor | undefined): Content {
+    if (!this.loaded) {
+      return { head: "", note: "", cards: [] };
+    }
     if (!this.store.rootUri) {
       return { head: "", note: renderNote("CodeLight needs an open folder."), cards: [] };
     }
