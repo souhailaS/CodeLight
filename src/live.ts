@@ -124,7 +124,12 @@ export class LiveRanges implements vscode.Disposable {
         live = recovered;
       }
       const current = this.spanOf(document, annotation);
-      if (current.start === live.start && current.end === live.end) {
+      const currentText = text.slice(live.start, live.end).slice(0, MAX_ANCHOR_TEXT);
+      if (
+        current.start === live.start &&
+        current.end === live.end &&
+        currentText === annotation.anchor.text
+      ) {
         continue;
       }
       moved.set(annotation.id, this.toMove(document, text, live));
@@ -171,13 +176,13 @@ export class LiveRanges implements vscode.Disposable {
       this.spansFor(document);
       return;
     }
-    if (document.version !== version) {
-      return;
-    }
+    const unchanged = document.version === version;
     for (const [id, move] of moved) {
-      state.spans.set(id, move.span);
-      state.placements.set(id, move.placement);
       state.seeded.set(id, toRange(move.placement));
+      if (unchanged) {
+        state.spans.set(id, move.span);
+        state.placements.set(id, move.placement);
+      }
     }
     for (const id of orphaned.keys()) {
       state.spans.delete(id);
@@ -261,16 +266,18 @@ export class LiveRanges implements vscode.Disposable {
         existing.seeded.delete(id);
       }
     }
-    for (const annotation of stored) {
-      if (annotation.orphaned !== true && !existing.spans.has(annotation.id)) {
-        const span = this.spanOf(document, annotation);
-        existing.spans.set(annotation.id, span);
-        existing.seeded.set(annotation.id, annotation.range);
-        existing.placements.set(annotation.id, {
-          start: document.positionAt(span.start),
-          end: document.positionAt(span.end)
-        });
-      }
+    const arriving = stored.filter(
+      (annotation) => annotation.orphaned !== true && !existing.spans.has(annotation.id)
+    );
+    const arrivingText = arriving.length > 0 ? document.getText() : "";
+    for (const annotation of arriving) {
+      const span = this.seedSpan(document, arrivingText, annotation);
+      existing.spans.set(annotation.id, span);
+      existing.seeded.set(annotation.id, annotation.range);
+      existing.placements.set(annotation.id, {
+        start: document.positionAt(span.start),
+        end: document.positionAt(span.end)
+      });
     }
     return existing;
   }
@@ -339,9 +346,8 @@ export class LiveRanges implements vscode.Disposable {
     for (const change of event.contentChanges) {
       const start = change.rangeOffset;
       const end = start + change.rangeLength;
-      const delta = change.text.length - change.rangeLength;
       for (const [id, span] of state.spans) {
-        state.spans.set(id, shiftSpan(span, start, end, delta));
+        state.spans.set(id, shiftSpan(span, start, end, change.text.length));
       }
     }
     this.refreshPlacements(event.document, state);
