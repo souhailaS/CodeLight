@@ -1,7 +1,7 @@
 import { Anchor } from "./model";
 
 const ANCHOR_CONTEXT = 60;
-const MAX_ANCHOR_TEXT = 400;
+export const MAX_ANCHOR_TEXT = 400;
 
 export interface Located {
   start: number;
@@ -27,8 +27,7 @@ export function findAnchor(text: string, anchor: Anchor): Located | undefined {
   return (
     locate(text, `${anchor.before}${anchor.text}${anchor.after}`, anchor.before.length, length) ??
     locate(text, `${anchor.before}${anchor.text}`, anchor.before.length, length) ??
-    locate(text, `${anchor.text}${anchor.after}`, 0, length) ??
-    locate(text, anchor.text, 0, length)
+    locate(text, `${anchor.text}${anchor.after}`, 0, length)
   );
 }
 

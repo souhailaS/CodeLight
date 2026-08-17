@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { buildAnchor, findAnchor } from "./anchors";
+import { buildAnchor, findAnchor, Located, MAX_ANCHOR_TEXT } from "./anchors";
 import { Anchor, Annotation, AnnotationRange } from "./model";
 import { toRelativePath } from "./paths";
 import { shiftSpan, Span } from "./ranges";
@@ -10,6 +10,12 @@ export type SpanMap = Map<string, Span>;
 interface Placement {
   start: vscode.Position;
   end: vscode.Position;
+}
+
+interface Move {
+  placement: Placement;
+  anchor: Anchor;
+  span: Span;
 }
 
 interface DocumentState {
@@ -26,6 +32,15 @@ function sameRange(a: AnnotationRange, b: AnnotationRange): boolean {
     a.endLine === b.endLine &&
     a.endCharacter === b.endCharacter
   );
+}
+
+function toRange(placement: Placement): AnnotationRange {
+  return {
+    startLine: placement.start.line,
+    startCharacter: placement.start.character,
+    endLine: placement.end.line,
+    endCharacter: placement.end.character
+  };
 }
 
 export class LiveRanges implements vscode.Disposable {
@@ -77,26 +92,19 @@ export class LiveRanges implements vscode.Disposable {
     const key = document.uri.toString();
     const relative = this.relativePath(document);
     const state = relative ? this.documents.get(key) : undefined;
-    if (!relative || !state || state.spans.size === 0) {
+    const stored = relative ? this.store.forFile(relative) : [];
+    if (!state || stored.length === 0) {
       this.holding.delete(key);
       return;
     }
     const text = document.getText();
-    const moved = new Map<string, { placement: Placement; anchor: Anchor }>();
+    const moved = new Map<string, Move>();
     const orphaned = new Map<string, Placement>();
-    const revived = new Map<string, { placement: Placement; anchor: Anchor; span: Span }>();
-    for (const annotation of this.store.forFile(relative)) {
+    for (const annotation of stored) {
       if (annotation.orphaned === true) {
-        const recovered = findAnchor(text, annotation.anchor);
+        const recovered = this.recover(document, text, annotation);
         if (recovered) {
-          revived.set(annotation.id, {
-            placement: {
-              start: document.positionAt(recovered.start),
-              end: document.positionAt(recovered.end)
-            },
-            anchor: buildAnchor(text, recovered.start, recovered.end),
-            span: { start: recovered.start, end: recovered.end }
-          });
+          moved.set(annotation.id, this.toMove(document, text, recovered));
         }
         continue;
       }
@@ -108,35 +116,27 @@ export class LiveRanges implements vscode.Disposable {
       }
       let live = span;
       if (live.start === live.end) {
-        const recovered = findAnchor(text, annotation.anchor);
+        const recovered = this.recover(document, text, annotation);
         if (!recovered) {
           orphaned.set(annotation.id, placement);
           continue;
         }
         live = recovered;
-        state.spans.set(annotation.id, live);
-        state.placements.set(annotation.id, {
-          start: document.positionAt(live.start),
-          end: document.positionAt(live.end)
-        });
       }
       const current = this.spanOf(document, annotation);
       if (current.start === live.start && current.end === live.end) {
         continue;
       }
-      const target = state.placements.get(annotation.id) ?? placement;
-      moved.set(annotation.id, {
-        placement: target,
-        anchor: buildAnchor(text, live.start, live.end)
-      });
+      moved.set(annotation.id, this.toMove(document, text, live));
     }
-    if (moved.size === 0 && orphaned.size === 0 && revived.size === 0) {
+    if (moved.size === 0 && orphaned.size === 0) {
       this.holding.delete(key);
       return;
     }
+    const version = document.version;
     const saved = await this.store.transaction((annotations) => {
       let changed = false;
-      for (const [id, entry] of [...moved, ...revived]) {
+      for (const [id, move] of moved) {
         const annotation = annotations.get(id);
         if (!annotation) {
           continue;
@@ -144,13 +144,8 @@ export class LiveRanges implements vscode.Disposable {
         annotations.set(id, {
           ...annotation,
           orphaned: undefined,
-          anchor: entry.anchor,
-          range: {
-            startLine: entry.placement.start.line,
-            startCharacter: entry.placement.start.character,
-            endLine: entry.placement.end.line,
-            endCharacter: entry.placement.end.character
-          }
+          anchor: move.anchor,
+          range: toRange(move.placement)
         });
         changed = true;
       }
@@ -159,21 +154,12 @@ export class LiveRanges implements vscode.Disposable {
         if (!annotation) {
           continue;
         }
-        annotations.set(id, {
-          ...annotation,
-          orphaned: true,
-          range: {
-            startLine: placement.start.line,
-            startCharacter: placement.start.character,
-            endLine: placement.end.line,
-            endCharacter: placement.end.character
-          }
-        });
+        annotations.set(id, { ...annotation, orphaned: true, range: toRange(placement) });
         changed = true;
       }
       return changed;
     });
-    const stillPresent = [...moved.keys(), ...orphaned.keys(), ...revived.keys()].some(
+    const stillPresent = [...moved.keys(), ...orphaned.keys()].some(
       (id) => this.store.byId(id) !== undefined
     );
     if (!saved && stillPresent) {
@@ -185,23 +171,47 @@ export class LiveRanges implements vscode.Disposable {
       this.spansFor(document);
       return;
     }
-    for (const [id, entry] of [...moved, ...revived]) {
-      state.seeded.set(id, {
-        startLine: entry.placement.start.line,
-        startCharacter: entry.placement.start.character,
-        endLine: entry.placement.end.line,
-        endCharacter: entry.placement.end.character
-      });
+    if (document.version !== version) {
+      return;
+    }
+    for (const [id, move] of moved) {
+      state.spans.set(id, move.span);
+      state.placements.set(id, move.placement);
+      state.seeded.set(id, toRange(move.placement));
     }
     for (const id of orphaned.keys()) {
       state.spans.delete(id);
       state.placements.delete(id);
       state.seeded.delete(id);
     }
-    for (const [id, entry] of revived) {
-      state.spans.set(id, entry.span);
-      state.placements.set(id, entry.placement);
+  }
+
+  private toMove(document: vscode.TextDocument, text: string, span: Span): Move {
+    return {
+      span,
+      placement: { start: document.positionAt(span.start), end: document.positionAt(span.end) },
+      anchor: buildAnchor(text, span.start, span.end)
+    };
+  }
+
+  private recover(
+    document: vscode.TextDocument,
+    text: string,
+    annotation: Annotation
+  ): Span | undefined {
+    const found = findAnchor(text, annotation.anchor);
+    if (!found) {
+      return undefined;
     }
+    return this.expand(text, annotation, found, this.spanOf(document, annotation));
+  }
+
+  private expand(text: string, annotation: Annotation, found: Located, stored: Span): Span {
+    if (annotation.anchor.text.length < MAX_ANCHOR_TEXT) {
+      return { start: found.start, end: found.end };
+    }
+    const length = Math.max(found.end - found.start, stored.end - stored.start);
+    return { start: found.start, end: Math.min(text.length, found.start + length) };
   }
 
   private forget(document: vscode.TextDocument): void {
@@ -231,11 +241,10 @@ export class LiveRanges implements vscode.Disposable {
         seeded: new Map(),
         eol: document.eol
       };
-      for (const annotation of stored) {
-        if (annotation.orphaned === true) {
-          continue;
-        }
-        state.spans.set(annotation.id, this.spanOf(document, annotation));
+      const live = stored.filter((annotation) => annotation.orphaned !== true);
+      const text = live.length > 0 ? document.getText() : "";
+      for (const annotation of live) {
+        state.spans.set(annotation.id, this.seedSpan(document, text, annotation));
         state.seeded.set(annotation.id, annotation.range);
       }
       this.refreshPlacements(document, state);
@@ -264,6 +273,18 @@ export class LiveRanges implements vscode.Disposable {
       }
     }
     return existing;
+  }
+
+  private seedSpan(document: vscode.TextDocument, text: string, annotation: Annotation): Span {
+    const span = this.spanOf(document, annotation);
+    if (
+      annotation.anchor.text === "" ||
+      text.slice(span.start, span.end) === annotation.anchor.text
+    ) {
+      return span;
+    }
+    const found = findAnchor(text, annotation.anchor);
+    return found ? this.expand(text, annotation, found, span) : span;
   }
 
   private refreshPlacements(document: vscode.TextDocument, state: DocumentState): void {
@@ -295,7 +316,11 @@ export class LiveRanges implements vscode.Disposable {
       return;
     }
     const state = this.documents.get(key);
-    if (!state || state.spans.size === 0) {
+    if (!state) {
+      return;
+    }
+    if (state.spans.size === 0) {
+      state.eol = event.document.eol;
       return;
     }
     if (event.contentChanges.length === 0) {
@@ -326,6 +351,7 @@ export class LiveRanges implements vscode.Disposable {
   private afterShift(document: vscode.TextDocument): void {
     if (!document.isDirty) {
       this.forget(document);
+      this.spansFor(document);
       this.changeEmitter.fire(document);
       return;
     }
