@@ -39,10 +39,17 @@ export class CommentCommands {
       return;
     }
     const now = comment.createdAt;
+    let ran = false;
     let found = false;
+    let lost = false;
     const saved = await this.store.transaction((annotations) => {
+      ran = true;
       const current = annotations.get(target.id);
       if (!current) {
+        return false;
+      }
+      if (current.orphaned === true) {
+        lost = true;
         return false;
       }
       found = true;
@@ -53,8 +60,22 @@ export class CommentCommands {
       });
       return true;
     });
-    if (!saved && !found) {
+    if (!ran) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      return;
+    }
+    if (lost) {
+      void vscode.window.showWarningMessage(
+        "That highlight lost its text while you were typing, so the comment was not saved."
+      );
+      return;
+    }
+    if (!found) {
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      return;
+    }
+    if (!saved) {
+      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
     }
   }
 
@@ -181,9 +202,12 @@ export class CommentCommands {
       return undefined;
     }
     const primary = editor.selection;
+    if (editor.selections.length > 1) {
+      return CREATE;
+    }
     if (!primary.isEmpty) {
       const enclosing = this.highlights.enclosing(primary);
-      if (enclosing.length === 0 || editor.selections.length > 1) {
+      if (enclosing.length === 0) {
         return CREATE;
       }
       const picked =
