@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises";
+import { chmod, lstat, rename } from "node:fs/promises";
 import { promisify } from "node:util";
 import { gunzip, gzip } from "node:zlib";
 import * as vscode from "vscode";
@@ -45,6 +45,11 @@ interface Outcome {
   duplicate: boolean;
 }
 
+interface TargetInfo {
+  shared: boolean;
+  mode: number;
+}
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -61,7 +66,6 @@ async function decodeStore(bytes: Uint8Array, target: vscode.Uri): Promise<strin
   return text.replace(/^\uFEFF/, "");
 }
 
-const BINARY_RULE = "*.json.gz binary";
 const TEMPORARY_NAME = /^codelight\.write-.+\.tmp$/;
 const TEMPORARY_AGE_MS = 10 * 60 * 1000;
 
@@ -69,18 +73,15 @@ function temporaryName(): string {
   return `codelight.write-${newId()}.tmp`;
 }
 
-async function keepsInode(target: vscode.Uri): Promise<boolean> {
+async function inspectTarget(target: vscode.Uri): Promise<TargetInfo | undefined> {
   if (target.scheme !== "file") {
-    return false;
+    return undefined;
   }
   try {
     const info = await lstat(target.fsPath);
-    if (info.isSymbolicLink() || info.nlink > 1) {
-      return true;
-    }
-    return (info.mode & 0o777) !== (0o666 & ~process.umask());
+    return { shared: info.isSymbolicLink() || info.nlink > 1, mode: info.mode & 0o7777 };
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -302,41 +303,7 @@ export class AnnotationStore implements vscode.Disposable {
       void vscode.window.showInformationMessage(`CodeLight now stores annotations in ${destination.fsPath}.`);
       return true;
     });
-    if (converted && isCompressed(destination)) {
-      await this.offerBinaryRule(destination);
-    }
     return converted;
-  }
-
-  private async offerBinaryRule(destination: vscode.Uri): Promise<void> {
-    const attributes = vscode.Uri.joinPath(destination, "..", "..", ".gitattributes");
-    let current = "";
-    try {
-      current = Buffer.from(await vscode.workspace.fs.readFile(attributes)).toString("utf8");
-    } catch (error) {
-      if (!isMissingFile(error)) {
-        return;
-      }
-    }
-    if (current.includes(BINARY_RULE)) {
-      return;
-    }
-    const answer = await vscode.window.showInformationMessage(
-      `Add ${BINARY_RULE} to ${attributes.fsPath} so git never rewrites the compressed store?`,
-      "Add"
-    );
-    if (answer !== "Add") {
-      return;
-    }
-    const separator = current === "" || current.endsWith("\n") ? "" : "\n";
-    try {
-      await vscode.workspace.fs.writeFile(
-        attributes,
-        Buffer.from(`${current}${separator}${BINARY_RULE}\n`, "utf8")
-      );
-    } catch (error) {
-      this.reportFailure(`CodeLight could not update ${attributes.fsPath}. ${describe(error)}`);
-    }
   }
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -595,14 +562,18 @@ export class AnnotationStore implements vscode.Disposable {
     const bytes = await encodeStore(content, target);
     const folder = vscode.Uri.joinPath(target, "..");
     await vscode.workspace.fs.createDirectory(folder);
-    if (await keepsInode(target)) {
+    const existing = await inspectTarget(target);
+    if (target.scheme !== "file" || existing?.shared) {
       await vscode.workspace.fs.writeFile(target, bytes);
       return;
     }
     const temporary = vscode.Uri.joinPath(folder, temporaryName());
     try {
       await vscode.workspace.fs.writeFile(temporary, bytes);
-      await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
+      if (existing) {
+        await chmod(temporary.fsPath, existing.mode);
+      }
+      await rename(temporary.fsPath, target.fsPath);
     } catch (error) {
       await this.cleanup(temporary);
       throw error;

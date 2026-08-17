@@ -48,7 +48,7 @@ Everything else lives in the command palette under **CodeLight**, in the editor 
 
 The compressed format writes `.vscode/codelight.json.gz`, which is much smaller but is a binary file that git cannot diff or merge. To move an existing store between the two formats, run **CodeLight: Convert Annotation Storage Format**, which writes the new file and removes the old one after you confirm.
 
-If you commit the compressed file, add `*.json.gz binary` to your `.gitattributes` first. A repository that forces `* text` rewrites line endings on checkout, which corrupts the gzip stream and leaves the store unreadable. The conversion command offers to add that line for you.
+If you commit the compressed file, add `*.json.gz binary` to your `.gitattributes` first. A repository that forces `* text` rewrites line endings on checkout, which corrupts the gzip stream and leaves the store unreadable.
 
 ## Installing
 
