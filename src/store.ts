@@ -5,6 +5,7 @@ import { readStorageMode } from "./palette";
 import { StorageMode, otherMode, resolveRoot, STORE_PATTERN, storeUri } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
+const MAX_STORE_BYTES = 64 * 1024 * 1024;
 
 type DiskState =
   | {
@@ -35,7 +36,9 @@ function isCompressed(target: vscode.Uri): boolean {
 
 function decodeStore(bytes: Uint8Array, target: vscode.Uri): string {
   const buffer = Buffer.from(bytes);
-  const text = isCompressed(target) ? gunzipSync(buffer).toString("utf8") : buffer.toString("utf8");
+  const text = isCompressed(target)
+    ? gunzipSync(buffer, { maxOutputLength: MAX_STORE_BYTES }).toString("utf8")
+    : buffer.toString("utf8");
   return text.replace(/^\uFEFF/, "");
 }
 
@@ -186,6 +189,9 @@ export class AnnotationStore implements vscode.Disposable {
         this.scheduleReload();
         return false;
       }
+      if (disk.status === "ok" && disk.source.toString() !== target.toString()) {
+        await this.discard(disk.source);
+      }
       if (generation !== this.generation) {
         return true;
       }
@@ -307,75 +313,52 @@ export class AnnotationStore implements vscode.Disposable {
         this.emitter.fire();
         return;
       }
-      if (disk.raw === this.lastSerialized) {
+      let origin = disk.source;
+      if (origin.toString() !== target.toString()) {
+        const moved = await this.converge(origin, target, disk.raw);
+        if (generation !== this.generation) {
+          return;
+        }
+        if (moved) {
+          origin = target;
+        }
+      } else if (disk.raw === this.lastSerialized) {
         return;
       }
       this.annotations = disk.annotations;
       this.lastSerialized = disk.raw;
-      this.warnAboutDropped(disk.dropped, disk.source);
+      this.warnAboutDropped(disk.dropped, origin);
       this.emitter.fire();
     });
   }
 
   private async applyMode(): Promise<void> {
-    const root = this.root;
-    if (!root) {
-      this.mode = readStorageMode();
-      return;
-    }
-    const next = readStorageMode(root);
-    if (next === this.mode) {
-      return;
-    }
-    const previous = storeUri(root, this.mode);
-    this.mode = next;
-    await this.migrate(previous);
+    this.mode = readStorageMode(this.root);
+    await this.load();
   }
 
-  private async migrate(previous: vscode.Uri): Promise<void> {
-    const target = this.location;
-    if (!target || target.toString() === previous.toString()) {
-      return;
+  private async converge(source: vscode.Uri, target: vscode.Uri, raw: string): Promise<boolean> {
+    try {
+      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
+      await vscode.workspace.fs.writeFile(target, encodeStore(raw, target));
+    } catch (error) {
+      this.reportFailure(`CodeLight could not save annotations to ${target.fsPath}. ${describe(error)}`);
+      return false;
     }
-    const generation = this.generation;
-    await this.enqueue(async () => {
-      if (generation !== this.generation) {
-        return;
+    return this.discard(source);
+  }
+
+  private async discard(previous: vscode.Uri): Promise<boolean> {
+    try {
+      await vscode.workspace.fs.delete(previous);
+    } catch (error) {
+      if (isMissingFile(error)) {
+        return true;
       }
-      const disk = await this.readDisk(previous);
-      if (generation !== this.generation) {
-        return;
-      }
-      if (disk.status === "error") {
-        this.reportFailure(disk.message);
-        return;
-      }
-      if (disk.status === "missing") {
-        return;
-      }
-      try {
-        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
-        await vscode.workspace.fs.writeFile(target, encodeStore(disk.raw, target));
-      } catch (error) {
-        this.reportFailure(`CodeLight could not save annotations to ${target.fsPath}. ${describe(error)}`);
-        return;
-      }
-      try {
-        await vscode.workspace.fs.delete(previous);
-      } catch (error) {
-        if (!isMissingFile(error)) {
-          this.reportFailure(`CodeLight could not remove ${previous.fsPath}. ${describe(error)}`);
-          return;
-        }
-      }
-      if (generation !== this.generation) {
-        return;
-      }
-      this.annotations = disk.annotations;
-      this.lastSerialized = disk.raw;
-      this.reportedFailure = undefined;
-      this.emitter.fire();
-    });
+      this.reportFailure(`CodeLight could not remove ${previous.fsPath}. ${describe(error)}`);
+      return false;
+    }
+    return true;
   }
 
   private reportFailure(message: string): void {
