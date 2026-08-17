@@ -33,7 +33,11 @@ export class AnnotationStore implements vscode.Disposable {
   readonly onDidChange = this.emitter.event;
 
   constructor() {
+    const discovery = vscode.workspace.createFileSystemWatcher("**/.vscode/codelight.json");
+    discovery.onDidCreate(() => void this.bind());
+    discovery.onDidDelete(() => void this.bind());
     this.disposables.push(
+      discovery,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         void this.bind();
       })
@@ -69,6 +73,7 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async add(annotation: Annotation): Promise<boolean> {
+    await this.flushPendingReload();
     if (!this.canWrite()) {
       return false;
     }
@@ -78,6 +83,7 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async update(id: string, mutate: (annotation: Annotation) => Annotation): Promise<boolean> {
+    await this.flushPendingReload();
     const existing = this.annotations.get(id);
     if (!existing || !this.canWrite()) {
       return false;
@@ -88,12 +94,22 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async remove(id: string): Promise<boolean> {
+    await this.flushPendingReload();
     if (!this.annotations.has(id) || !this.canWrite()) {
       return false;
     }
     this.annotations.delete(id);
     await this.persist();
     return true;
+  }
+
+  private async flushPendingReload(): Promise<void> {
+    if (!this.reloadTimer) {
+      return;
+    }
+    clearTimeout(this.reloadTimer);
+    this.reloadTimer = undefined;
+    await this.load();
   }
 
   private canWrite(): boolean {
@@ -181,6 +197,7 @@ export class AnnotationStore implements vscode.Disposable {
       this.emitter.fire();
       return;
     }
+    this.blocked = false;
     if (raw === this.lastSerialized) {
       return;
     }
@@ -239,6 +256,8 @@ export class AnnotationStore implements vscode.Disposable {
       } catch (error) {
         if (generation === this.generation) {
           this.lastSerialized = undefined;
+          this.blocked = true;
+          this.scheduleReload();
         }
         void vscode.window.showErrorMessage(`CodeLight could not save annotations. ${describe(error)}`);
       }
