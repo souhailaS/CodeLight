@@ -408,6 +408,18 @@ export class ThreadView implements vscode.Disposable {
         "CodeLight comments on one selection at a time. Using the first one."
       );
     }
+    for (const open of this.pending.keys()) {
+      if (
+        open.uri.toString() === editor.document.uri.toString() &&
+        open.range !== undefined &&
+        !open.range.intersection(range)?.isEmpty
+      ) {
+        open.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+        editor.selection = new vscode.Selection(range.end, range.end);
+        await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
+        return;
+      }
+    }
     const text = editor.document.getText();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
     thread.label = "New CodeLight note";
