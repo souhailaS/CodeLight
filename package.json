@@ -291,6 +291,11 @@
           "command": "codelight.threadReply",
           "group": "inline",
           "when": "commentController == codelight"
+        },
+        {
+          "command": "codelight.threadHighlightOnly",
+          "group": "inline@2",
+          "when": "commentController == codelight && commentThread == draft"
         }
       ],
       "comments/comment/title": [
@@ -318,11 +323,6 @@
         }
       ],
       "comments/commentThread/title": [
-        {
-          "command": "codelight.threadHighlightOnly",
-          "group": "inline@1",
-          "when": "commentController == codelight && commentThread == draft"
-        },
         {
           "command": "codelight.threadDeleteHighlight",
           "group": "inline@2",

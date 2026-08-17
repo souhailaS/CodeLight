@@ -38,9 +38,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand(
       "codelight.threadHighlightOnly",
-      async (thread?: vscode.CommentThread) => {
+      async (target?: vscode.CommentReply | vscode.CommentThread) => {
         await ready;
-        await threads.highlightOnly(thread);
+        await threads.highlightOnly(target);
       }
     ),
     vscode.commands.registerCommand(

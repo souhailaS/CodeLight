@@ -91,6 +91,7 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async reply(reply: vscode.CommentReply): Promise<void> {
+    const owned = this.owners.get(reply.thread);
     const body = reply.text.trim();
     if (body === "") {
       return;
@@ -123,7 +124,6 @@ export class ThreadView implements vscode.Disposable {
       createdAt: now,
       updatedAt: now
     };
-    const owned = this.owners.get(reply.thread);
     if (owned !== undefined) {
       const annotation = this.store.byId(owned);
       const document = vscode.workspace.textDocuments.find(
@@ -327,6 +327,9 @@ export class ThreadView implements vscode.Disposable {
         : found
           ? "CodeLight could not save the comment."
           : "That comment is no longer in the shared file.";
+      if (ran && !found) {
+        await this.store.refresh();
+      }
       void vscode.window.showWarningMessage(withRescue(reason, rescued));
       return;
     }
@@ -496,7 +499,10 @@ export class ThreadView implements vscode.Disposable {
     await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
   }
 
-  async highlightOnly(thread?: vscode.CommentThread): Promise<void> {
+  async highlightOnly(target?: vscode.CommentReply | vscode.CommentThread): Promise<void> {
+    const thread =
+      target && "thread" in target ? (target as vscode.CommentReply).thread : (target as vscode.CommentThread | undefined);
+    const typed = target && "text" in target ? (target as vscode.CommentReply).text.trim() : "";
     if (!thread || !this.pending.has(thread)) {
       return;
     }
@@ -504,7 +510,18 @@ export class ThreadView implements vscode.Disposable {
     if (!author) {
       return;
     }
-    await this.createAnnotation(thread, undefined, { login: author.login, id: author.id });
+    const created = await this.createAnnotation(thread, undefined, {
+      login: author.login,
+      id: author.id
+    });
+    if (created !== undefined && typed !== "") {
+      const rescued = await rescue(typed);
+      if (rescued) {
+        void vscode.window.showInformationMessage(
+          "Saved the highlight without the comment. Your text was copied to the clipboard."
+        );
+      }
+    }
   }
 
   async deleteHighlight(thread?: vscode.CommentThread): Promise<void> {
@@ -597,16 +614,16 @@ export class ThreadView implements vscode.Disposable {
     let range: vscode.Range;
     if (draft && document.version !== draft.version) {
       const found = findAnchor(document.getText(), draft.anchor);
-      if (!found) {
-        const rescued = comment ? await rescue(comment.body) : false;
-        void vscode.window.showWarningMessage(
-          withRescue("The file changed and the selection could not be found again.", rescued)
-        );
-        return undefined;
+      if (found) {
+        const width = Math.max(found.end - found.start, draft.length);
+        const end = Math.min(document.getText().length, found.start + width);
+        range = new vscode.Range(document.positionAt(found.start), document.positionAt(end));
+      } else if (requested && !requested.isEmpty) {
+        range = document.validateRange(requested);
+      } else {
+        const line = document.lineAt(Math.min(requested ? requested.start.line : 0, document.lineCount - 1));
+        range = line.range.isEmpty ? line.rangeIncludingLineBreak : line.range;
       }
-      const width = Math.max(found.end - found.start, draft.length);
-      const end = Math.min(document.getText().length, found.start + width);
-      range = new vscode.Range(document.positionAt(found.start), document.positionAt(end));
     } else if (requested && !requested.isEmpty) {
       range = document.validateRange(requested);
     } else {
@@ -714,6 +731,11 @@ export class ThreadView implements vscode.Disposable {
     }
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
+        for (const entry of thread.comments) {
+          if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
+            void this.rescueLostEdit(entry);
+          }
+        }
         this.owners.delete(thread);
         this.drafts.delete(id);
         thread.dispose();
