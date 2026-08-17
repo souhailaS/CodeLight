@@ -51,17 +51,46 @@
         "command": "codelight.removeOrphaned",
         "title": "Remove Orphaned Highlights",
         "category": "CodeLight"
+      },
+      {
+        "command": "codelight.addComment",
+        "title": "Comment on Selection",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.reply",
+        "title": "Reply to Highlight",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.editComment",
+        "title": "Edit Comment",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.deleteComment",
+        "title": "Delete Comment",
+        "category": "CodeLight"
       }
     ],
     "keybindings": [
       {
         "command": "codelight.addHighlight",
-        "key": "ctrl+alt+k",
+        "key": "ctrl+k ctrl+h",
         "mac": "cmd+alt+k",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codelight.addComment",
+        "key": "ctrl+k ctrl+m",
+        "mac": "cmd+alt+m",
         "when": "editorTextFocus"
       }
     ],
     "menus": {
+      "commandPalette": [
+        { "command": "codelight.reply", "when": "false" }
+      ],
       "editor/context": [
         {
           "command": "codelight.addHighlight",
@@ -69,8 +98,13 @@
           "when": "editorTextFocus"
         },
         {
-          "command": "codelight.removeHighlight",
+          "command": "codelight.addComment",
           "group": "codelight@2",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "codelight.removeHighlight",
+          "group": "codelight@3",
           "when": "editorTextFocus"
         }
       ]
@@ -123,6 +157,17 @@
               "hex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
             }
           }
+        },
+        "codelight.inlineComments": {
+          "type": "string",
+          "default": "preview",
+          "enum": ["off", "count", "preview"],
+          "enumDescriptions": [
+            "Show nothing after a commented highlight",
+            "Show the number of comments",
+            "Show the latest comment"
+          ],
+          "description": "What to show inline after a highlight that has comments."
         },
         "codelight.highlightOpacity": {
           "type": "number",

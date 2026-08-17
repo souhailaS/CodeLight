@@ -1,14 +1,19 @@
 import * as vscode from "vscode";
 import { LiveRanges } from "./live";
-import { PaletteColor, readOpacity, readPalette, resolveColor, toRgba } from "./palette";
+import { Annotation } from "./model";
+import { PaletteColor, readInlineMode, readOpacity, readPalette, resolveColor, toRgba } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
+import { InlineMode, inlineLabel, threadMarkdown } from "./thread";
 
 export class HighlightRenderer implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private types = new Map<string, vscode.TextEditorDecorationType>();
   private palette: PaletteColor[] = [];
   private paletteRoot: string | undefined;
+  private badge: vscode.TextEditorDecorationType | undefined;
+  private hovers = new Map<string, vscode.MarkdownString>();
+  private inline: InlineMode = "preview";
 
   constructor(
     private readonly store: AnnotationStore,
@@ -17,6 +22,7 @@ export class HighlightRenderer implements vscode.Disposable {
     this.rebuild();
     this.disposables.push(
       store.onDidChange(() => {
+        this.hovers = new Map();
         if (this.paletteRoot !== this.store.rootUri?.toString()) {
           this.rebuild();
         }
@@ -27,7 +33,8 @@ export class HighlightRenderer implements vscode.Disposable {
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (
           event.affectsConfiguration("codelight.palette") ||
-          event.affectsConfiguration("codelight.highlightOpacity")
+          event.affectsConfiguration("codelight.highlightOpacity") ||
+          event.affectsConfiguration("codelight.inlineComments")
         ) {
           this.rebuild();
           this.renderAll();
@@ -52,10 +59,11 @@ export class HighlightRenderer implements vscode.Disposable {
     const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
     const annotations = relative ? this.store.forFile(relative) : [];
     const spans = annotations.length > 0 ? this.live.spansFor(editor.document) : undefined;
-    const grouped = new Map<string, vscode.Range[]>();
+    const grouped = new Map<string, vscode.DecorationOptions[]>();
     for (const key of this.types.keys()) {
       grouped.set(key, []);
     }
+    const labels = new Map<number, string[]>();
     for (const annotation of annotations) {
       if (annotation.orphaned === true) {
         continue;
@@ -63,17 +71,51 @@ export class HighlightRenderer implements vscode.Disposable {
       const key = this.types.has(annotation.color)
         ? annotation.color
         : resolveColor(this.palette, annotation.color).id;
-      const ranges = grouped.get(key);
-      if (ranges) {
-        ranges.push(this.live.rangeFor(editor.document, annotation, spans));
+      const options = grouped.get(key);
+      if (!options) {
+        continue;
+      }
+      const range = this.live.rangeFor(editor.document, annotation, spans);
+      options.push({ range, hoverMessage: this.hover(annotation) });
+      const label = range.isEmpty ? undefined : inlineLabel(annotation, this.inline);
+      if (label !== undefined) {
+        const anchorLine =
+          range.end.character === 0 && range.end.line > range.start.line
+            ? range.end.line - 1
+            : range.end.line;
+        const line = labels.get(anchorLine) ?? [];
+        line.push(label.trim());
+        labels.set(anchorLine, line);
       }
     }
-    for (const [key, ranges] of grouped) {
+    for (const [key, options] of grouped) {
       const type = this.types.get(key);
       if (type) {
-        editor.setDecorations(type, ranges);
+        editor.setDecorations(type, options);
       }
     }
+    if (this.badge) {
+      const badges: vscode.DecorationOptions[] = [];
+      for (const [line, parts] of labels) {
+        const lineEnd = editor.document.lineAt(line).range.end;
+        badges.push({
+          range: new vscode.Range(lineEnd, lineEnd),
+          renderOptions: { after: { contentText: ` ${parts.join("  ·  ")}` } }
+        });
+      }
+      editor.setDecorations(this.badge, badges);
+    }
+  }
+
+  private hover(annotation: Annotation): vscode.MarkdownString {
+    const key = `${annotation.id}:${annotation.updatedAt}`;
+    const cached = this.hovers.get(key);
+    if (cached) {
+      return cached;
+    }
+    const markdown = threadMarkdown(annotation);
+    this.hovers.set(key, markdown);
+    return markdown;
   }
 
   private renderDocument(document: vscode.TextDocument): void {
@@ -93,6 +135,16 @@ export class HighlightRenderer implements vscode.Disposable {
     this.paletteRoot = resource?.toString();
     this.palette = readPalette(resource);
     const opacity = readOpacity(resource);
+    this.inline = readInlineMode(resource);
+    this.badge?.dispose();
+    this.badge = vscode.window.createTextEditorDecorationType({
+      after: {
+        color: new vscode.ThemeColor("editorCodeLens.foreground"),
+        fontStyle: "italic",
+        margin: "0 0 0 1rem"
+      },
+      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
+    });
     for (const color of this.palette) {
       this.types.set(
         color.id,
@@ -112,6 +164,8 @@ export class HighlightRenderer implements vscode.Disposable {
       type.dispose();
     }
     this.types = new Map();
+    this.badge?.dispose();
+    this.badge = undefined;
     for (const disposable of this.disposables) {
       disposable.dispose();
     }

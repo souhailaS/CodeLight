@@ -1,12 +1,13 @@
 import * as vscode from "vscode";
-import { buildAnchor } from "./anchors";
+import { buildAnchor, findAnchor } from "./anchors";
 import { HighlightRenderer } from "./decorations";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
-import { Annotation } from "./model";
+import { Anchor, Annotation, Author, Comment } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
+import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
 
 const SNIPPET_LENGTH = 50;
@@ -53,7 +54,7 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(): Promise<Annotation[]> {
+  async add(compose?: (author: Author) => Promise<Comment | undefined>): Promise<Annotation[]> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -89,9 +90,11 @@ export class HighlightCommands {
       return [];
     }
     const text = editor.document.getText();
-    const anchors = ranges.map((range) =>
-      buildAnchor(text, editor.document.offsetAt(range.start), editor.document.offsetAt(range.end))
-    );
+    const offsets = ranges.map((range) => ({
+      start: editor.document.offsetAt(range.start),
+      end: editor.document.offsetAt(range.end)
+    }));
+    const anchors = offsets.map((offset) => buildAnchor(text, offset.start, offset.end));
     const version = editor.document.version;
     const author = await this.identity.require();
     if (!author) {
@@ -107,8 +110,37 @@ export class HighlightCommands {
       );
       return [];
     }
+    const seed = compose ? await compose({ login: author.login, id: author.id }) : undefined;
+    if (compose && !seed) {
+      return [];
+    }
+    let placed = ranges;
+    let placedAnchors = anchors;
+    if (editor.document.version !== version) {
+      const current = editor.document.getText();
+      const relocated: vscode.Range[] = [];
+      const rebuilt: Anchor[] = [];
+      for (const [index, anchor] of anchors.entries()) {
+        const found = findAnchor(current, anchor);
+        if (!found) {
+          const rescued = seed ? await rescue(seed.body) : false;
+          void vscode.window.showWarningMessage(
+            withRescue("The file changed and the selection could not be found again.", rescued)
+          );
+          return [];
+        }
+        const wanted = offsets[index].end - offsets[index].start;
+        const end = Math.min(current.length, found.start + Math.max(found.end - found.start, wanted));
+        relocated.push(
+          new vscode.Range(editor.document.positionAt(found.start), editor.document.positionAt(end))
+        );
+        rebuilt.push(buildAnchor(current, found.start, end));
+      }
+      placed = relocated;
+      placedAnchors = rebuilt;
+    }
     const now = timestamp();
-    const created = ranges.map((range, index) => ({
+    const created = placed.map((range, index) => ({
       id: newId(),
       file: relative,
       range: {
@@ -117,12 +149,12 @@ export class HighlightCommands {
         endLine: range.end.line,
         endCharacter: range.end.character
       },
-      anchor: anchors[index],
+      anchor: placedAnchors[index],
       color: color.id,
       author: { login: author.login, id: author.id },
       createdAt: now,
       updatedAt: now,
-      comments: []
+      comments: seed ? [{ ...seed, id: newId() }] : []
     })) as Annotation[];
     const saved = await this.store.transaction((annotations) => {
       for (const annotation of created) {
@@ -131,7 +163,10 @@ export class HighlightCommands {
       return true;
     });
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not save the highlight.");
+      const rescued = seed ? await rescue(seed.body) : false;
+      void vscode.window.showWarningMessage(
+        withRescue("CodeLight could not save the highlight.", rescued)
+      );
       return [];
     }
     return created;
@@ -158,8 +193,52 @@ export class HighlightCommands {
     });
   }
 
-  async pickAtCursor(title: string): Promise<Annotation | undefined> {
-    const candidates = this.atCursor();
+  isCollapsed(annotation: Annotation): boolean {
+    const editor = vscode.window.activeTextEditor;
+    const root = this.store.rootUri;
+    const relative = editor && root ? toRelativePath(root, editor.document.uri) : undefined;
+    if (!editor || relative !== annotation.file) {
+      return annotation.orphaned === true;
+    }
+    return this.live.rangeFor(editor.document, annotation).isEmpty;
+  }
+
+  atCursorLive(): Annotation[] {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      return [];
+    }
+    const spans = this.live.spansFor(editor.document);
+    return this.atCursor().filter((annotation) => {
+      if (annotation.orphaned === true) {
+        return false;
+      }
+      return !this.live.rangeFor(editor.document, annotation, spans).isEmpty;
+    });
+  }
+
+  enclosing(selection: vscode.Selection): Annotation[] {
+    const editor = vscode.window.activeTextEditor;
+    const root = this.store.rootUri;
+    if (!editor || !root) {
+      return [];
+    }
+    const relative = toRelativePath(root, editor.document.uri);
+    if (!relative) {
+      return [];
+    }
+    const spans = this.live.spansFor(editor.document);
+    return this.store.forFile(relative).filter((annotation) => {
+      if (annotation.orphaned === true) {
+        return false;
+      }
+      const range = this.live.rangeFor(editor.document, annotation, spans);
+      return !range.isEmpty && range.contains(selection);
+    });
+  }
+
+  async pickAtCursor(title: string, provided?: Annotation[]): Promise<Annotation | undefined> {
+    const candidates = provided ?? this.atCursor();
     if (candidates.length === 0) {
       void vscode.window.showInformationMessage("No CodeLight highlight at the cursor.");
       return undefined;
@@ -175,9 +254,13 @@ export class HighlightCommands {
     const picked = await vscode.window.showQuickPick(
       candidates.map((annotation) => {
         const orphan = isOrphan(annotation);
+        const thread =
+          annotation.comments.length === 0
+            ? ""
+            : `, ${annotation.comments.length} comment${annotation.comments.length === 1 ? "" : "s"}`;
         return {
           label: orphan ? `${snippet(annotation)} (text deleted)` : snippet(annotation),
-          description: `${annotation.color} by ${annotation.author.login}`,
+          description: `${annotation.color} by ${annotation.author.login}${thread}`,
           annotation
         };
       }),
@@ -191,8 +274,47 @@ export class HighlightCommands {
     if (!annotation) {
       return;
     }
-    if (!(await this.store.remove(annotation.id))) {
+    const fresh = this.store.byId(annotation.id) ?? annotation;
+    const count = fresh.comments.length;
+    if (count > 0) {
+      const confirmed = await vscode.window.showWarningMessage(
+        `Remove this highlight and its ${count} comment${count === 1 ? "" : "s"}?`,
+        { modal: true },
+        "Remove"
+      );
+      if (confirmed !== "Remove") {
+        return;
+      }
+    }
+    let drifted = false;
+    let missing = false;
+    const removed = await this.store.transaction((annotations) => {
+      const current = annotations.get(annotation.id);
+      if (!current) {
+        missing = true;
+        return false;
+      }
+      if (current.comments.length !== count) {
+        drifted = true;
+        return false;
+      }
+      annotations.delete(annotation.id);
+      return true;
+    });
+    if (missing) {
+      await this.store.refresh();
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      return;
+    }
+    if (drifted) {
+      await this.store.refresh();
+      void vscode.window.showWarningMessage(
+        "The comments on that highlight just changed. Run Remove Highlight again to confirm."
+      );
+      return;
+    }
+    if (!removed) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
     }
   }
 
@@ -212,8 +334,11 @@ export class HighlightCommands {
     const picked = await vscode.window.showQuickPick(
       orphans.map((annotation) => ({
         label: snippet(annotation),
-        description: `by ${annotation.author.login}`,
-        picked: true,
+        description:
+          annotation.comments.length === 0
+            ? `by ${annotation.author.login}`
+            : `by ${annotation.author.login}, ${annotation.comments.length} comment${annotation.comments.length === 1 ? "" : "s"} will be deleted`,
+        picked: annotation.comments.length === 0,
         annotation
       })),
       { title: "Remove orphaned highlights", canPickMany: true }
@@ -221,15 +346,46 @@ export class HighlightCommands {
     if (!picked || picked.length === 0) {
       return;
     }
-    const ids = new Set(picked.map((item) => item.annotation.id));
+    const threaded = picked.filter((item) => item.annotation.comments.length > 0);
+    if (threaded.length > 0) {
+      const total = threaded.reduce((sum, item) => sum + item.annotation.comments.length, 0);
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete ${threaded.length} highlight${threaded.length === 1 ? "" : "s"} carrying ${total} comment${total === 1 ? "" : "s"}?`,
+        { modal: true },
+        "Delete"
+      );
+      if (confirmed !== "Delete") {
+        return;
+      }
+    }
+    const expected = new Map(
+      picked.map((item) => [item.annotation.id, item.annotation.comments.length])
+    );
+    let drifted = false;
     const saved = await this.store.transaction((annotations) => {
       let changed = false;
-      for (const id of ids) {
-        changed = annotations.delete(id) || changed;
+      for (const [id, count] of expected) {
+        const current = annotations.get(id);
+        if (!current) {
+          continue;
+        }
+        if (current.comments.length !== count) {
+          drifted = true;
+          return false;
+        }
+        annotations.delete(id);
+        changed = true;
       }
       return changed;
     });
-    const remaining = [...ids].some((id) => this.store.byId(id) !== undefined);
+    if (drifted) {
+      await this.store.refresh();
+      void vscode.window.showWarningMessage(
+        "Those highlights just changed. Run Remove Orphaned Highlights again to confirm."
+      );
+      return;
+    }
+    const remaining = [...expected.keys()].some((id) => this.store.byId(id) !== undefined);
     if (!saved && remaining) {
       void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
     }
