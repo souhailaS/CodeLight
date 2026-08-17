@@ -97,7 +97,11 @@ export class HighlightRenderer implements vscode.Disposable {
       options.push({ range, hoverMessage: this.hover(annotation) });
       const gutter = marks.get(key);
       if (gutter && !range.isEmpty) {
-        for (let line = range.start.line; line <= range.end.line; line += 1) {
+        const last =
+          range.end.character === 0 && range.end.line > range.start.line
+            ? range.end.line - 1
+            : range.end.line;
+        for (let line = range.start.line; line <= last; line += 1) {
           gutter.push(new vscode.Range(line, 0, line, 0));
         }
       }

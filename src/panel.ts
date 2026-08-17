@@ -4,7 +4,6 @@ import { Annotation, Comment } from "./model";
 import { DEFAULT_PALETTE, PaletteColor, readPalette } from "./palette";
 import { toUri } from "./paths";
 import { AnnotationStore } from "./store";
-import { Visibility } from "./visibility";
 import { snippet } from "./thread";
 
 export interface FileNode {
@@ -204,12 +203,10 @@ export class PanelCommands {
   constructor(
     private readonly store: AnnotationStore,
     private readonly live: LiveRanges,
-    private readonly tree: AnnotationTree,
-    private readonly visibility: Visibility
+    private readonly tree: AnnotationTree
   ) {}
 
   async reveal(annotationId: string): Promise<void> {
-    this.visibility.show();
     const annotation = this.store.byId(annotationId);
     const root = this.store.rootUri;
     if (!annotation || !root) {

@@ -41,6 +41,13 @@ export class MarkerMode implements vscode.Disposable {
         this.last = undefined;
       })
     );
+    this.disposables.push(
+      visibility.onDidChange((shown) => {
+        if (!shown) {
+          this.off();
+        }
+      })
+    );
     void vscode.commands.executeCommand("setContext", "codelight.marker", false);
   }
 
@@ -107,7 +114,6 @@ export class MarkerMode implements vscode.Disposable {
       event.kind !== vscode.TextEditorSelectionChangeKind.Keyboard
     ) {
       this.cancel();
-      this.last = undefined;
       return;
     }
     if (event.textEditor !== vscode.window.activeTextEditor) {
@@ -144,7 +150,6 @@ export class MarkerMode implements vscode.Disposable {
     if (relative) {
       const taken = this.highlights.markedRanges(editor, relative);
       if (ranges.every((range) => taken.some((existing) => existing.isEqual(range)))) {
-        this.last = undefined;
         this.catchUp(editor, ranges);
         return;
       }
@@ -182,11 +187,7 @@ export class MarkerMode implements vscode.Disposable {
       if (live.isEmpty) {
         continue;
       }
-      const overlaps = ranges.some((range) => {
-        const shared = range.intersection(live);
-        return shared !== undefined && !shared.isEmpty;
-      });
-      if (overlaps) {
+      if (ranges.some((range) => range.contains(live) && !range.isEqual(live))) {
         doomed.push(id);
       }
     }
