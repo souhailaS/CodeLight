@@ -25,6 +25,11 @@
         "command": "codelight.showStatus",
         "title": "Show Status",
         "category": "CodeLight"
+      },
+      {
+        "command": "codelight.signIn",
+        "title": "Sign in with GitHub",
+        "category": "CodeLight"
       }
     ]
   },
