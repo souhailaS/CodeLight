@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { HighlightCommands } from "./highlights";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
-import { Annotation, Comment } from "./model";
+import { Annotation, Author, Comment } from "./model";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 
@@ -26,33 +26,26 @@ export class CommentCommands {
     if (target === undefined) {
       return;
     }
-    const body = await this.prompt("Add a comment", "");
-    if (body === undefined) {
+    if (target === CREATE) {
+      await this.highlights.add((author) => this.compose(author));
       return;
     }
     const author = await this.identity.require();
     if (!author) {
       return;
     }
-    const now = timestamp();
-    const comment: Comment = {
-      id: newId(),
-      author: { login: author.login, id: author.id },
-      body,
-      createdAt: now,
-      updatedAt: now
-    };
-    if (target === CREATE) {
-      await this.highlights.add(comment);
+    const comment = await this.compose({ login: author.login, id: author.id });
+    if (!comment) {
       return;
     }
-    let ran = false;
+    const now = comment.createdAt;
+    let found = false;
     const saved = await this.store.transaction((annotations) => {
-      ran = true;
       const current = annotations.get(target.id);
       if (!current) {
         return false;
       }
+      found = true;
       annotations.set(target.id, {
         ...current,
         updatedAt: now,
@@ -60,13 +53,18 @@ export class CommentCommands {
       });
       return true;
     });
-    if (!saved) {
-      void vscode.window.showWarningMessage(
-        ran
-          ? "That highlight is no longer in the shared file."
-          : "CodeLight could not update the shared file."
-      );
+    if (!saved && !found) {
+      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
     }
+  }
+
+  private async compose(author: Author): Promise<Comment | undefined> {
+    const body = await this.prompt("Add a comment", "");
+    if (body === undefined) {
+      return undefined;
+    }
+    const now = timestamp();
+    return { id: newId(), author, body, createdAt: now, updatedAt: now };
   }
 
   async edit(annotationId?: string): Promise<void> {
@@ -182,8 +180,17 @@ export class CommentCommands {
       );
       return undefined;
     }
-    if (editor.selections.some((selection) => !selection.isEmpty)) {
-      return CREATE;
+    const primary = editor.selection;
+    if (!primary.isEmpty) {
+      const enclosing = this.highlights.enclosing(primary);
+      if (enclosing.length === 0 || editor.selections.length > 1) {
+        return CREATE;
+      }
+      const picked =
+        enclosing.length === 1
+          ? enclosing[0]
+          : await this.highlights.pickAtCursor("Comment on highlight", enclosing);
+      return picked ? this.live(picked) : undefined;
     }
     const candidates = this.highlights.atCursor().filter((entry) => entry.orphaned !== true);
     if (candidates.length === 0) {

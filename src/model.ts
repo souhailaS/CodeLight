@@ -97,7 +97,7 @@ function parseComment(value: unknown): Comment | undefined {
   }
   const id = readString(value.id).trim();
   const author = parseAuthor(value.author);
-  if (!isSafeId(id) || !author) {
+  if (id === "" || !author) {
     return undefined;
   }
   const createdAt = readString(value.createdAt);
@@ -108,12 +108,6 @@ function parseComment(value: unknown): Comment | undefined {
     createdAt,
     updatedAt: readString(value.updatedAt, createdAt)
   };
-}
-
-const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
-
-export function isSafeId(candidate: string): boolean {
-  return SAFE_ID.test(candidate);
 }
 
 export function isSafeRelativePath(candidate: string): boolean {
@@ -138,7 +132,7 @@ function parseAnnotation(value: unknown, dropped: DropCounter): Annotation | und
   const id = readString(value.id).trim();
   const file = readString(value.file).trim();
   const author = parseAuthor(value.author);
-  if (!isSafeId(id) || !isSafeRelativePath(file) || !author) {
+  if (id === "" || !isSafeRelativePath(file) || !author) {
     return undefined;
   }
   const createdAt = readString(value.createdAt);

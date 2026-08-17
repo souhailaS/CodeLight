@@ -4,7 +4,7 @@ import { HighlightRenderer } from "./decorations";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
-import { Annotation, Comment } from "./model";
+import { Annotation, Author, Comment } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
@@ -53,7 +53,7 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(initialComment?: Comment): Promise<Annotation[]> {
+  async add(compose?: (author: Author) => Promise<Comment | undefined>): Promise<Annotation[]> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -107,6 +107,16 @@ export class HighlightCommands {
       );
       return [];
     }
+    const seed = compose ? await compose({ login: author.login, id: author.id }) : undefined;
+    if (compose && !seed) {
+      return [];
+    }
+    if (editor.document.version !== version) {
+      void vscode.window.showWarningMessage(
+        "The file changed while you were typing. Select the text again."
+      );
+      return [];
+    }
     const now = timestamp();
     const created = ranges.map((range, index) => ({
       id: newId(),
@@ -122,7 +132,7 @@ export class HighlightCommands {
       author: { login: author.login, id: author.id },
       createdAt: now,
       updatedAt: now,
-      comments: initialComment ? [{ ...initialComment, id: newId() }] : []
+      comments: seed ? [{ ...seed, id: newId() }] : []
     })) as Annotation[];
     const saved = await this.store.transaction((annotations) => {
       for (const annotation of created) {
@@ -155,6 +165,26 @@ export class HighlightCommands {
       }
       const range = this.live.rangeFor(editor.document, annotation, spans);
       return range.isEmpty ? range.start.line === position.line : range.contains(position);
+    });
+  }
+
+  enclosing(selection: vscode.Selection): Annotation[] {
+    const editor = vscode.window.activeTextEditor;
+    const root = this.store.rootUri;
+    if (!editor || !root) {
+      return [];
+    }
+    const relative = toRelativePath(root, editor.document.uri);
+    if (!relative) {
+      return [];
+    }
+    const spans = this.live.spansFor(editor.document);
+    return this.store.forFile(relative).filter((annotation) => {
+      if (annotation.orphaned === true) {
+        return false;
+      }
+      const range = this.live.rangeFor(editor.document, annotation, spans);
+      return !range.isEmpty && range.contains(selection);
     });
   }
 
