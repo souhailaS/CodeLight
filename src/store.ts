@@ -31,11 +31,18 @@ interface StoreFiles {
   fresh: vscode.Uri;
 }
 
+type Duplicate = "yes" | "no" | "unknown";
+
 type Choice =
-  | { status: "ok"; target: vscode.Uri; duplicate: boolean }
+  | { status: "ok"; target: vscode.Uri; duplicate: Duplicate }
   | { status: "error"; message: string };
 
 type Presence = { status: "ok"; present: boolean } | { status: "error"; message: string };
+
+interface Outcome {
+  target: vscode.Uri;
+  duplicate: boolean;
+}
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -182,9 +189,15 @@ export class AnnotationStore implements vscode.Disposable {
       this.reportFailure(chosen.message);
       return false;
     }
-    if (chosen.duplicate) {
+    if (chosen.duplicate === "yes") {
       void vscode.window.showWarningMessage(
         `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. Remove the one you do not want before converting.`
+      );
+      return false;
+    }
+    if (chosen.duplicate === "unknown") {
+      void vscode.window.showWarningMessage(
+        `CodeLight could not check both annotation files, so it left ${chosen.target.fsPath} alone.`
       );
       return false;
     }
@@ -302,30 +315,44 @@ export class AnnotationStore implements vscode.Disposable {
     }
   }
 
+  private resolve(files: StoreFiles, hasPlain: boolean, hasCompressed: boolean): Outcome {
+    if (hasPlain && this.active?.toString() === files.plain.toString()) {
+      return { target: files.plain, duplicate: hasCompressed };
+    }
+    if (hasCompressed) {
+      return { target: files.compressed, duplicate: hasPlain };
+    }
+    if (hasPlain) {
+      return { target: files.plain, duplicate: false };
+    }
+    return { target: this.active ?? files.fresh, duplicate: false };
+  }
+
   private async pick(files: StoreFiles): Promise<Choice> {
     const plain = await this.inspect(files.plain);
     const compressed = await this.inspect(files.compressed);
-    const hasPlain = plain.status === "ok" && plain.present;
-    const hasCompressed = compressed.status === "ok" && compressed.present;
-    if (hasPlain && this.active?.toString() === files.plain.toString()) {
-      return { status: "ok", target: files.plain, duplicate: hasCompressed };
+    const plainStates = plain.status === "ok" ? [plain.present] : [true, false];
+    const compressedStates = compressed.status === "ok" ? [compressed.present] : [true, false];
+    const outcomes: Outcome[] = [];
+    for (const hasPlain of plainStates) {
+      for (const hasCompressed of compressedStates) {
+        outcomes.push(this.resolve(files, hasPlain, hasCompressed));
+      }
     }
-    if (hasCompressed) {
-      return { status: "ok", target: files.compressed, duplicate: hasPlain };
+    const first = outcomes[0];
+    if (outcomes.some((outcome) => outcome.target.toString() !== first.target.toString())) {
+      if (plain.status === "error") {
+        return { status: "error", message: plain.message };
+      }
+      if (compressed.status === "error") {
+        return { status: "error", message: compressed.message };
+      }
     }
-    if (hasPlain) {
-      return { status: "ok", target: files.plain, duplicate: false };
+    const agreed = outcomes.every((outcome) => outcome.duplicate === first.duplicate);
+    if (!agreed) {
+      return { status: "ok", target: first.target, duplicate: "unknown" };
     }
-    if (this.active) {
-      return { status: "ok", target: this.active, duplicate: false };
-    }
-    if (plain.status === "error") {
-      return { status: "error", message: plain.message };
-    }
-    if (compressed.status === "error") {
-      return { status: "error", message: compressed.message };
-    }
-    return { status: "ok", target: files.fresh, duplicate: false };
+    return { status: "ok", target: first.target, duplicate: first.duplicate ? "yes" : "no" };
   }
 
   private async commit(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
@@ -377,6 +404,7 @@ export class AnnotationStore implements vscode.Disposable {
       this.lastSerialized = content;
       this.reportedFailure = undefined;
       this.emitter.fire();
+      await this.sweep(vscode.Uri.joinPath(target, "..", ".."));
       return true;
     });
   }
@@ -582,8 +610,11 @@ export class AnnotationStore implements vscode.Disposable {
     void vscode.window.showErrorMessage(message);
   }
 
-  private warnAboutDuplicate(duplicate: boolean, target: vscode.Uri, files: StoreFiles): void {
-    if (!duplicate) {
+  private warnAboutDuplicate(duplicate: Duplicate, target: vscode.Uri, files: StoreFiles): void {
+    if (duplicate === "unknown") {
+      return;
+    }
+    if (duplicate === "no") {
       this.reportedDuplicate = false;
       return;
     }
