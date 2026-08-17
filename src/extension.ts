@@ -3,6 +3,7 @@ import { CommentCommands } from "./comments";
 import { HighlightRenderer } from "./decorations";
 import { HighlightCommands } from "./highlights";
 import { IdentityProvider } from "./identity";
+import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
 import { AnnotationStore } from "./store";
 
@@ -13,6 +14,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const renderer = new HighlightRenderer(store, live);
   const highlights = new HighlightCommands(store, identity, renderer, live);
   const comments = new CommentCommands(store, identity, highlights);
+  const tree = new AnnotationTree(store);
+  const panel = new PanelCommands(store, live, tree);
+  const view = vscode.window.createTreeView("codelight.annotations", {
+    treeDataProvider: tree,
+    showCollapseAll: true
+  });
   const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
 
   context.subscriptions.push(
@@ -20,6 +27,34 @@ export function activate(context: vscode.ExtensionContext): void {
     store,
     live,
     renderer,
+    tree,
+    view,
+    vscode.commands.registerCommand("codelight.showPanel", async () => {
+      await vscode.commands.executeCommand("codelight.annotations.focus");
+    }),
+    vscode.commands.registerCommand("codelight.revealAnnotation", async (id: string) => {
+      await ready;
+      await panel.reveal(id);
+    }),
+    vscode.commands.registerCommand("codelight.deleteAnnotation", async (node?: Node | string) => {
+      await ready;
+      await panel.deleteAnnotation(node);
+    }),
+    vscode.commands.registerCommand("codelight.deleteFileHighlights", async (node?: Node) => {
+      await ready;
+      await panel.deleteFile(node);
+    }),
+    vscode.commands.registerCommand("codelight.deleteOrphansEverywhere", async () => {
+      await ready;
+      await panel.deleteOrphansEverywhere();
+    }),
+    vscode.commands.registerCommand("codelight.filterByColor", async () => {
+      await ready;
+      await panel.filterByColor();
+    }),
+    vscode.commands.registerCommand("codelight.clearFilter", () => {
+      panel.clearFilter();
+    }),
     vscode.commands.registerCommand("codelight.signIn", async () => {
       const account = await identity.require();
       if (account) {
@@ -46,17 +81,17 @@ export function activate(context: vscode.ExtensionContext): void {
       await ready;
       await comments.add();
     }),
-    vscode.commands.registerCommand("codelight.reply", async (annotationId?: string) => {
+    vscode.commands.registerCommand("codelight.reply", async (target?: unknown) => {
       await ready;
-      await comments.add(annotationId);
+      await comments.add(nodeId(target));
     }),
-    vscode.commands.registerCommand("codelight.editComment", async (annotationId?: string) => {
+    vscode.commands.registerCommand("codelight.editComment", async (target?: unknown) => {
       await ready;
-      await comments.edit(annotationId);
+      await comments.edit(nodeId(target));
     }),
-    vscode.commands.registerCommand("codelight.deleteComment", async (annotationId?: string) => {
+    vscode.commands.registerCommand("codelight.deleteComment", async (target?: unknown) => {
       await ready;
-      await comments.remove(annotationId);
+      await comments.remove(nodeId(target));
     }),
     vscode.commands.registerCommand("codelight.showStatus", async () => {
       await ready;

@@ -4,6 +4,7 @@ import { Annotation } from "./model";
 const TRUSTED_COMMANDS = ["codelight.reply", "codelight.editComment", "codelight.deleteComment"];
 const PREVIEW_LENGTH = 40;
 const LINKABLE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const SNIPPET_LENGTH = 50;
 
 export type InlineMode = "off" | "count" | "preview";
 
@@ -17,6 +18,14 @@ function commandLink(command: string, id: string, label: string): string {
     .replace(/\(/g, "%28")
     .replace(/\)/g, "%29");
   return `[${label}](command:${command}?${args})`;
+}
+
+export function snippet(annotation: Annotation): string {
+  const text = annotation.anchor.text.replace(/\s+/g, " ").trim();
+  if (text === "") {
+    return "empty selection";
+  }
+  return text.length <= SNIPPET_LENGTH ? text : `${text.slice(0, SNIPPET_LENGTH)}…`;
 }
 
 export function threadMarkdown(annotation: Annotation): vscode.MarkdownString {

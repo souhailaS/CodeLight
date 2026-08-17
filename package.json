@@ -71,6 +71,47 @@
         "command": "codelight.deleteComment",
         "title": "Delete Comment",
         "category": "CodeLight"
+      },
+      {
+        "command": "codelight.showPanel",
+        "title": "Show Annotations",
+        "category": "CodeLight",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "codelight.revealAnnotation",
+        "title": "Reveal Highlight",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.deleteAnnotation",
+        "title": "Delete Highlight",
+        "category": "CodeLight",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codelight.deleteFileHighlights",
+        "title": "Delete All Highlights in File",
+        "category": "CodeLight",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codelight.filterByColor",
+        "title": "Filter by Color",
+        "category": "CodeLight",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "codelight.clearFilter",
+        "title": "Clear Filter",
+        "category": "CodeLight",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "codelight.deleteOrphansEverywhere",
+        "title": "Delete All Orphaned Highlights",
+        "category": "CodeLight",
+        "icon": "$(clear-all)"
       }
     ],
     "keybindings": [
@@ -89,7 +130,26 @@
     ],
     "menus": {
       "commandPalette": [
-        { "command": "codelight.reply", "when": "false" }
+        {
+          "command": "codelight.reply",
+          "when": "false"
+        },
+        {
+          "command": "codelight.revealAnnotation",
+          "when": "false"
+        },
+        {
+          "command": "codelight.deleteFileHighlights",
+          "when": "false"
+        },
+        {
+          "command": "codelight.clearFilter",
+          "when": "codelight.filtered"
+        },
+        {
+          "command": "codelight.deleteAnnotation",
+          "when": "false"
+        }
       ],
       "editor/context": [
         {
@@ -107,38 +167,103 @@
           "group": "codelight@3",
           "when": "editorTextFocus"
         }
+      ],
+      "editor/title": [
+        {
+          "command": "codelight.showPanel",
+          "group": "navigation@9",
+          "when": "editorIsOpen"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "codelight.filterByColor",
+          "when": "view == codelight.annotations && !codelight.filtered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codelight.clearFilter",
+          "when": "view == codelight.annotations && codelight.filtered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codelight.deleteOrphansEverywhere",
+          "when": "view == codelight.annotations",
+          "group": "1_cleanup"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codelight.reply",
+          "when": "view == codelight.annotations && viewItem == codelight.annotation",
+          "group": "inline@1"
+        },
+        {
+          "command": "codelight.deleteAnnotation",
+          "when": "view == codelight.annotations && viewItem =~ /codelight.(annotation|orphan)/",
+          "group": "inline@2"
+        },
+        {
+          "command": "codelight.deleteFileHighlights",
+          "when": "view == codelight.annotations && viewItem == codelight.file",
+          "group": "inline@1"
+        }
       ]
     },
     "colors": [
       {
         "id": "codelight.yellow",
         "description": "CodeLight yellow highlight",
-        "defaults": { "light": "#ffd54f", "dark": "#ffd54f", "highContrast": "#ffd54f" }
+        "defaults": {
+          "light": "#ffd54f",
+          "dark": "#ffd54f",
+          "highContrast": "#ffd54f"
+        }
       },
       {
         "id": "codelight.green",
         "description": "CodeLight green highlight",
-        "defaults": { "light": "#81c784", "dark": "#81c784", "highContrast": "#81c784" }
+        "defaults": {
+          "light": "#81c784",
+          "dark": "#81c784",
+          "highContrast": "#81c784"
+        }
       },
       {
         "id": "codelight.blue",
         "description": "CodeLight blue highlight",
-        "defaults": { "light": "#64b5f6", "dark": "#64b5f6", "highContrast": "#64b5f6" }
+        "defaults": {
+          "light": "#64b5f6",
+          "dark": "#64b5f6",
+          "highContrast": "#64b5f6"
+        }
       },
       {
         "id": "codelight.purple",
         "description": "CodeLight purple highlight",
-        "defaults": { "light": "#ba68c8", "dark": "#ba68c8", "highContrast": "#ba68c8" }
+        "defaults": {
+          "light": "#ba68c8",
+          "dark": "#ba68c8",
+          "highContrast": "#ba68c8"
+        }
       },
       {
         "id": "codelight.pink",
         "description": "CodeLight pink highlight",
-        "defaults": { "light": "#f06292", "dark": "#f06292", "highContrast": "#f06292" }
+        "defaults": {
+          "light": "#f06292",
+          "dark": "#f06292",
+          "highContrast": "#f06292"
+        }
       },
       {
         "id": "codelight.orange",
         "description": "CodeLight orange highlight",
-        "defaults": { "light": "#ffb74d", "dark": "#ffb74d", "highContrast": "#ffb74d" }
+        "defaults": {
+          "light": "#ffb74d",
+          "dark": "#ffb74d",
+          "highContrast": "#ffb74d"
+        }
       }
     ],
     "configuration": {
@@ -150,18 +275,32 @@
           "markdownDescription": "Highlight colors offered in the picker. Leave empty to use the built in palette.",
           "items": {
             "type": "object",
-            "required": ["id", "hex"],
+            "required": [
+              "id",
+              "hex"
+            ],
             "properties": {
-              "id": { "type": "string" },
-              "label": { "type": "string" },
-              "hex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "hex": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              }
             }
           }
         },
         "codelight.inlineComments": {
           "type": "string",
           "default": "preview",
-          "enum": ["off", "count", "preview"],
+          "enum": [
+            "off",
+            "count",
+            "preview"
+          ],
           "enumDescriptions": [
             "Show nothing after a commented highlight",
             "Show the number of comments",
@@ -177,6 +316,24 @@
           "description": "Opacity of the highlight background."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codelight",
+          "title": "CodeLight",
+          "icon": "media/codelight.svg"
+        }
+      ]
+    },
+    "views": {
+      "codelight": [
+        {
+          "id": "codelight.annotations",
+          "name": "Annotations",
+          "icon": "media/codelight.svg"
+        }
+      ]
     }
   },
   "scripts": {
