@@ -150,7 +150,8 @@ export class HighlightRenderer implements vscode.Disposable {
         color.id,
         vscode.window.createTextEditorDecorationType({
           backgroundColor: toRgba(color.hex, opacity),
-          borderRadius: "2px",
+          border: `1px solid ${toRgba(color.hex, Math.min(1, opacity + 0.22))}`,
+          borderRadius: "3px",
           overviewRulerColor: color.hex,
           overviewRulerLane: vscode.OverviewRulerLane.Right,
           rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed

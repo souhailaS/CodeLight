@@ -76,7 +76,11 @@
       {
         "command": "codelight.addComment",
         "title": "Comment on Selection",
-        "category": "CodeLight"
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/note-light.svg",
+          "dark": "media/note-dark.svg"
+        }
       },
       {
         "command": "codelight.reply",
@@ -178,6 +182,24 @@
         "title": "Delete Highlight",
         "category": "CodeLight",
         "icon": "$(trash)"
+      },
+      {
+        "command": "codelight.markerOn",
+        "title": "Turn On Marker",
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/mark-light.svg",
+          "dark": "media/mark-dark.svg"
+        }
+      },
+      {
+        "command": "codelight.markerOff",
+        "title": "Turn Off Marker",
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/marker-on-light.svg",
+          "dark": "media/marker-on-dark.svg"
+        }
       }
     ],
     "keybindings": [
@@ -268,7 +290,17 @@
       ],
       "editor/title": [
         {
-          "command": "codelight.showPanel",
+          "command": "codelight.markerOn",
+          "group": "navigation@8",
+          "when": "editorIsOpen && !codelight.marker"
+        },
+        {
+          "command": "codelight.markerOff",
+          "group": "navigation@8",
+          "when": "editorIsOpen && codelight.marker"
+        },
+        {
+          "command": "codelight.addComment",
           "group": "navigation@9",
           "when": "editorIsOpen"
         }

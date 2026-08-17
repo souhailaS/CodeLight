@@ -1,11 +1,13 @@
 import * as vscode from "vscode";
 import { CommentCommands } from "./comments";
 import { HighlightRenderer } from "./decorations";
-import { HighlightCommands } from "./highlights";
+import { HighlightCommands, useSwatches } from "./highlights";
 import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
+import { MarkerMode } from "./marker";
 import { AnnotationStore } from "./store";
+import { Swatches } from "./swatches";
 import { ThreadComment, ThreadView } from "./threads";
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -13,7 +15,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const store = new AnnotationStore();
   const live = new LiveRanges(store);
   const renderer = new HighlightRenderer(store, live);
+  useSwatches(new Swatches(context.globalStorageUri));
   const highlights = new HighlightCommands(store, identity, renderer, live);
+  const marker = new MarkerMode(store, renderer, highlights);
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity);
   const tree = new AnnotationTree(store);
@@ -29,6 +33,14 @@ export function activate(context: vscode.ExtensionContext): void {
     store,
     live,
     renderer,
+    marker,
+    vscode.commands.registerCommand("codelight.markerOn", async () => {
+      await ready;
+      await marker.toggle();
+    }),
+    vscode.commands.registerCommand("codelight.markerOff", () => {
+      marker.off();
+    }),
     threads,
     tree,
     view,

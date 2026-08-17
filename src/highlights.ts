@@ -5,30 +5,30 @@ import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation } from "./model";
-import { DEFAULT_PALETTE, PaletteColor } from "./palette";
+import { PaletteColor } from "./palette";
+import { Swatches } from "./swatches";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { snippet } from "./thread";
 
-function colorIcon(color: PaletteColor): vscode.ThemeIcon {
-  const isDefault = DEFAULT_PALETTE.some(
-    (entry) => entry.id === color.id && entry.hex.toLowerCase() === color.hex.toLowerCase()
-  );
-  return isDefault
-    ? new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor(`codelight.${color.id}`))
-    : new vscode.ThemeIcon("circle-filled");
+let swatches: Swatches | undefined;
+
+export function useSwatches(store: Swatches): void {
+  swatches = store;
 }
 
 export async function pickColor(
   palette: readonly PaletteColor[],
   title: string
 ): Promise<PaletteColor | undefined> {
-  const items = palette.map((color) => ({
-    label: color.label,
-    description: color.hex,
-    iconPath: colorIcon(color),
-    color
-  }));
+  const items = await Promise.all(
+    palette.map(async (color) => ({
+      label: color.label,
+      description: color.hex,
+      iconPath: swatches ? await swatches.iconFor(color) : undefined,
+      color
+    }))
+  );
   const picked = await vscode.window.showQuickPick(items, {
     title,
     placeHolder: "Pick a highlight color"
@@ -44,7 +44,7 @@ export class HighlightCommands {
     private readonly live: LiveRanges
   ) {}
 
-  async add(): Promise<Annotation[]> {
+  async add(preset?: PaletteColor): Promise<Annotation[]> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -90,7 +90,7 @@ export class HighlightCommands {
     if (!author) {
       return [];
     }
-    const color = await pickColor(this.renderer.colors, "CodeLight");
+    const color = preset ?? (await pickColor(this.renderer.colors, "CodeLight"));
     if (!color) {
       return [];
     }
