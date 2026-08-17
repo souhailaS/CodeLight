@@ -1,5 +1,6 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import * as vscode from "vscode";
+import { newId } from "./ids";
 import { Annotation, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
 import { exists, resolveRoot, STORE_PATTERN, storeUri } from "./paths";
@@ -51,6 +52,10 @@ function decodeStore(bytes: Uint8Array, target: vscode.Uri): string {
     ? gunzipSync(buffer, { maxOutputLength: MAX_STORE_BYTES }).toString("utf8")
     : buffer.toString("utf8");
   return text.replace(/^\uFEFF/, "");
+}
+
+function temporaryName(): string {
+  return `codelight.write-${newId()}.tmp`;
 }
 
 function encodeStore(content: string, target: vscode.Uri): Buffer {
@@ -207,8 +212,7 @@ export class AnnotationStore implements vscode.Disposable {
         return false;
       }
       try {
-        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(destination, ".."));
-        await vscode.workspace.fs.writeFile(destination, encodeStore(disk.raw, destination));
+        await this.writeStore(destination, disk.raw);
       } catch (error) {
         this.reportFailure(
           `CodeLight could not save annotations to ${destination.fsPath}. ${describe(error)}`
@@ -307,8 +311,7 @@ export class AnnotationStore implements vscode.Disposable {
       }
       const content = serializeStore([...annotations.values()], rejected);
       try {
-        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
-        await vscode.workspace.fs.writeFile(target, encodeStore(content, target));
+        await this.writeStore(target, content);
       } catch (error) {
         this.reportFailure(`CodeLight could not save annotations to ${target.fsPath}. ${describe(error)}`);
         this.scheduleReload();
@@ -441,6 +444,27 @@ export class AnnotationStore implements vscode.Disposable {
       this.warnAboutDropped(disk.dropped, disk.source);
       this.emitter.fire();
     });
+  }
+
+  private async writeStore(target: vscode.Uri, content: string): Promise<void> {
+    const folder = vscode.Uri.joinPath(target, "..");
+    const temporary = vscode.Uri.joinPath(folder, temporaryName());
+    await vscode.workspace.fs.createDirectory(folder);
+    try {
+      await vscode.workspace.fs.writeFile(temporary, encodeStore(content, target));
+      await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
+    } catch (error) {
+      await this.cleanup(temporary);
+      throw error;
+    }
+  }
+
+  private async cleanup(temporary: vscode.Uri): Promise<void> {
+    try {
+      await vscode.workspace.fs.delete(temporary);
+    } catch {
+      return;
+    }
   }
 
   private async discard(previous: vscode.Uri): Promise<boolean> {
