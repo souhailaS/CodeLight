@@ -98,9 +98,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("codelight.addComment", async () => {
       await ready;
-      const target = await comments.locate();
-      if (target !== undefined) {
-        await threads.open(target);
+      const located = await comments.locate();
+      if (located.kind === "abort") {
+        return;
+      }
+      if (located.kind === "open") {
+        await threads.open(located.id);
         return;
       }
       const editor = vscode.window.activeTextEditor;
@@ -112,9 +115,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("codelight.reply", async (target?: unknown) => {
       await ready;
-      const id = nodeId(target) ?? (await comments.locate());
+      const id = nodeId(target);
       if (id !== undefined) {
         await threads.open(id);
+        return;
+      }
+      const located = await comments.locate();
+      if (located.kind === "open") {
+        await threads.open(located.id);
       }
     }),
     vscode.commands.registerCommand("codelight.editComment", async (target?: unknown) => {

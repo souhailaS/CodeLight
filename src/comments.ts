@@ -9,6 +9,8 @@ import { AnnotationStore } from "./store";
 
 const CREATE = "create";
 
+export type Located = { kind: "open"; id: string } | { kind: "draft" } | { kind: "abort" };
+
 function label(comment: Comment): string {
   const body = comment.body.replace(/\s+/g, " ").trim();
   return body.length > 60 ? `${body.slice(0, 60)}…` : body;
@@ -21,9 +23,12 @@ export class CommentCommands {
     private readonly highlights: HighlightCommands
   ) {}
 
-  async locate(): Promise<string | undefined> {
+  async locate(): Promise<Located> {
     const target = await this.target();
-    return target === undefined || target === CREATE ? undefined : target.id;
+    if (target === undefined) {
+      return { kind: "abort" };
+    }
+    return target === CREATE ? { kind: "draft" } : { kind: "open", id: target.id };
   }
 
   async add(annotationId?: string): Promise<void> {

@@ -283,10 +283,13 @@ export class PanelCommands {
       );
       return;
     }
-    if (missing) {
+    if (missing && !saved) {
       await this.store.refresh();
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
       return;
+    }
+    if (missing) {
+      await this.store.refresh();
     }
     if (!saved) {
       void vscode.window.showWarningMessage("CodeLight could not update the shared file.");

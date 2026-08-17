@@ -87,8 +87,9 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     if (body.length > MAX_COMMENT_BODY) {
+      await vscode.env.clipboard.writeText(body).then(undefined, () => undefined);
       void vscode.window.showWarningMessage(
-        `Keep comments under ${MAX_COMMENT_BODY} characters. This one is ${body.length}.`
+        `Keep comments under ${MAX_COMMENT_BODY} characters. This one is ${body.length} and was copied to the clipboard.`
       );
       return;
     }
@@ -109,7 +110,15 @@ export class ThreadView implements vscode.Disposable {
     if (annotationId === undefined) {
       return;
     }
-    if (owned !== undefined) {
+    if (owned === undefined) {
+      this.drafts.delete(annotationId);
+      const created = this.threads.get(annotationId);
+      if (created) {
+        created.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+      }
+      return;
+    }
+    {
       const saved = await this.store.update(annotationId, (current) => ({
         ...current,
         updatedAt: now,
@@ -126,6 +135,18 @@ export class ThreadView implements vscode.Disposable {
     this.drafts.delete(annotationId);
     reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.sync();
+  }
+
+  discardDraft(thread?: vscode.CommentThread): void {
+    if (thread && this.pending.has(thread)) {
+      this.pending.delete(thread);
+      thread.dispose();
+      return;
+    }
+    for (const entry of this.pending) {
+      entry.dispose();
+    }
+    this.pending.clear();
   }
 
   edit(comment: ThreadComment): void {
@@ -184,6 +205,11 @@ export class ThreadView implements vscode.Disposable {
     }));
     if (!saved) {
       void vscode.window.showWarningMessage("CodeLight could not save the comment.");
+      return;
+    }
+    if (edited instanceof ThreadComment) {
+      edited.savedBody = body;
+      edited.mode = vscode.CommentMode.Preview;
     }
     this.sync();
   }
@@ -226,6 +252,16 @@ export class ThreadView implements vscode.Disposable {
     const range = selection.isEmpty
       ? editor.document.lineAt(selection.active.line).range
       : new vscode.Range(selection.start, selection.end);
+    if (range.isEmpty) {
+      void vscode.window.showWarningMessage(
+        "This line is empty. Select some text to comment on."
+      );
+      return;
+    }
+    for (const entry of this.pending) {
+      entry.dispose();
+    }
+    this.pending.clear();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
     thread.label = "New CodeLight note";
     thread.contextValue = "codelight";
