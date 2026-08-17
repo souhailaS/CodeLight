@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
 import { HighlightCommands } from "./highlights";
-import { newId, timestamp } from "./ids";
+import { timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
-import { Annotation, Author, Comment } from "./model";
+import { Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { toRelativePath } from "./paths";
-import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
 
-const MAX_BODY = 2000;
 const CREATE = "create";
+
+export type Located = { kind: "open"; id: string } | { kind: "draft" } | { kind: "abort" };
 
 function label(comment: Comment): string {
   const body = comment.body.replace(/\s+/g, " ").trim();
@@ -22,80 +22,12 @@ export class CommentCommands {
     private readonly highlights: HighlightCommands
   ) {}
 
-  async add(annotationId?: string): Promise<void> {
-    const target = await this.target(annotationId);
+  async locate(): Promise<Located> {
+    const target = await this.target();
     if (target === undefined) {
-      return;
+      return { kind: "abort" };
     }
-    if (target === CREATE) {
-      await this.highlights.add((author) => this.compose(author));
-      return;
-    }
-    const author = await this.identity.require();
-    if (!author) {
-      return;
-    }
-    const comment = await this.compose({ login: author.login, id: author.id });
-    if (!comment) {
-      return;
-    }
-    const now = comment.createdAt;
-    let ran = false;
-    let found = false;
-    let lost = false;
-    const saved = await this.store.transaction((annotations) => {
-      ran = true;
-      const current = annotations.get(target.id);
-      if (!current) {
-        return false;
-      }
-      if (current.orphaned === true) {
-        lost = true;
-        return false;
-      }
-      found = true;
-      annotations.set(target.id, {
-        ...current,
-        updatedAt: now,
-        comments: [...current.comments, comment]
-      });
-      return true;
-    });
-    if (ran && found && saved) {
-      return;
-    }
-    const rescued = await rescue(comment.body);
-    if (!ran) {
-      void vscode.window.showWarningMessage(
-        withRescue("CodeLight could not update the shared file.", rescued)
-      );
-      return;
-    }
-    if (lost) {
-      void vscode.window.showWarningMessage(
-        withRescue("That highlight lost its text while you were typing.", rescued)
-      );
-      return;
-    }
-    if (!found) {
-      await this.store.refresh();
-      void vscode.window.showWarningMessage(
-        withRescue("That highlight is no longer in the shared file.", rescued)
-      );
-      return;
-    }
-    void vscode.window.showWarningMessage(
-      withRescue("CodeLight could not save the comment.", rescued)
-    );
-  }
-
-  private async compose(author: Author): Promise<Comment | undefined> {
-    const body = await this.prompt("Add a comment", "");
-    if (body === undefined) {
-      return undefined;
-    }
-    const now = timestamp();
-    return { id: newId(), author, body, createdAt: now, updatedAt: now };
+    return target === CREATE ? { kind: "draft" } : { kind: "open", id: target.id };
   }
 
   async edit(annotationId?: string): Promise<void> {
@@ -186,15 +118,7 @@ export class CommentCommands {
     }
   }
 
-  private async target(annotationId?: string): Promise<Annotation | typeof CREATE | undefined> {
-    if (annotationId !== undefined) {
-      const existing = this.store.byId(annotationId);
-      if (!existing) {
-        void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
-        return undefined;
-      }
-      return this.live(existing);
-    }
+  private async target(): Promise<Annotation | typeof CREATE | undefined> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to comment on.");
@@ -293,7 +217,7 @@ export class CommentCommands {
         if (input.trim() === "") {
           return "A comment cannot be empty.";
         }
-        return input.length > MAX_BODY ? `Keep it under ${MAX_BODY} characters.` : undefined;
+        return input.length > MAX_COMMENT_BODY ? `Keep it under ${MAX_COMMENT_BODY} characters.` : undefined;
       }
     });
     return body === undefined ? undefined : body.trim();

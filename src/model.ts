@@ -1,4 +1,5 @@
 export const STORE_VERSION = 1;
+export const MAX_COMMENT_BODY = 2000;
 
 export interface Author {
   login: string;

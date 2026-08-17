@@ -4,6 +4,8 @@
 
 Shared highlights and comments for VS Code, kept beside your code instead of inside it.
 
+![CodeLight in action](https://raw.githubusercontent.com/souhailaS/CodeLight/main/media/demo.gif)
+
 ## Why
 
 **We read more than we write.** VS Code stopped being only a code editor long ago. People draft documents in it, read specifications in it, and work through unfamiliar repositories in it.
