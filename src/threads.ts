@@ -173,7 +173,8 @@ export class ThreadView implements vscode.Disposable {
       createdAt: now,
       updatedAt: now
     };
-    const adopted = owned ?? this.annotationAt(reply.thread);
+    const adopted =
+      owned ?? (this.pending.has(reply.thread) ? undefined : this.annotationAt(reply.thread));
     if (adopted !== undefined) {
       const annotation = this.store.byId(adopted);
       const document = vscode.workspace.textDocuments.find(
@@ -195,6 +196,10 @@ export class ThreadView implements vscode.Disposable {
       adopted ?? (await this.createAnnotation(reply.thread, comment, comment.author));
     if (annotationId === undefined) {
       return;
+    }
+    if (adopted !== undefined && owned === undefined) {
+      this.pending.delete(reply.thread);
+      reply.thread.dispose();
     }
     if (owned === undefined && adopted === undefined) {
       this.drafts.delete(annotationId);
@@ -247,14 +252,19 @@ export class ThreadView implements vscode.Disposable {
     this.sync();
   }
 
-  private async rescueLostEdit(entry: ThreadComment): Promise<void> {
+  private async rescueLostEdit(entry: ThreadComment, gone: boolean): Promise<void> {
     const body = typeof entry.body === "string" ? entry.body : entry.body.value;
     if (body.trim() === "" || body === entry.savedBody) {
       return;
     }
     const rescued = await rescue(body);
     void vscode.window.showWarningMessage(
-      withRescue("The comment you were editing was removed from the shared file.", rescued)
+      withRescue(
+        gone
+          ? "The comment you were editing was removed from the shared file."
+          : "You were editing a comment when the notes were hidden.",
+        rescued
+      )
     );
   }
 
@@ -657,16 +667,17 @@ export class ThreadView implements vscode.Disposable {
       return undefined;
     }
     const spans = this.live.spansFor(document);
+    const covering: string[] = [];
     for (const annotation of this.store.forFile(relative)) {
       if (annotation.orphaned === true) {
         continue;
       }
       const live = this.live.rangeFor(document, annotation, spans);
       if (!live.isEmpty && live.start.line <= range.start.line && range.start.line <= live.end.line) {
-        return annotation.id;
+        covering.push(annotation.id);
       }
     }
-    return undefined;
+    return covering.length === 1 ? covering[0] : undefined;
   }
 
   private async createAnnotation(
@@ -781,7 +792,7 @@ export class ThreadView implements vscode.Disposable {
     }
     for (const [id, entry] of editing) {
       if (!annotation.comments.some((comment) => comment.id === id)) {
-        void this.rescueLostEdit(entry);
+        void this.rescueLostEdit(entry, true);
       }
     }
     thread.comments = annotation.comments.map((comment) => {
@@ -825,11 +836,9 @@ export class ThreadView implements vscode.Disposable {
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
         const gone = this.store.byId(id) === undefined;
-        if (gone) {
-          for (const entry of thread.comments) {
-            if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
-              void this.rescueLostEdit(entry);
-            }
+        for (const entry of thread.comments) {
+          if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
+            void this.rescueLostEdit(entry, gone);
           }
         }
         this.owners.delete(thread);

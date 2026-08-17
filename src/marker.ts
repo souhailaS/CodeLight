@@ -161,7 +161,8 @@ export class MarkerMode implements vscode.Disposable {
       return;
     }
     const live = this.live.rangeFor(editor.document, annotation);
-    if (live.isEmpty || !ranges[0].intersection(live)) {
+    const overlap = ranges[0].intersection(live);
+    if (live.isEmpty || overlap === undefined || overlap.isEmpty) {
       return;
     }
     await this.store.remove(previous.id);
