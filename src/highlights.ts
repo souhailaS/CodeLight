@@ -25,7 +25,9 @@ export async function pickColor(
     palette.map(async (color) => ({
       label: color.label,
       description: color.hex,
-      iconPath: swatches ? await swatches.iconFor(color) : undefined,
+      iconPath:
+        (swatches ? await swatches.iconFor(color) : undefined) ??
+        new vscode.ThemeIcon("circle-filled"),
       color
     }))
   );

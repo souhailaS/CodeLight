@@ -1,5 +1,6 @@
 # Changelog
 
+<<<<<<< HEAD
 ## 0.4.0
 
 Interface work, so the extension looks and behaves like the demo.
@@ -11,6 +12,21 @@ Interface work, so the extension looks and behaves like the demo.
 * A status bar count of the highlights and comments in the file you are reading.
 * A walkthrough on install, and welcome content in the panel when a project has no notes yet.
 * The comment button in the gutter now appears only on lines that already have a highlight, with a setting to put it everywhere or nowhere.
+* An eye button that hides every highlight and comment thread at once, and shows them again.
+=======
+## 0.3.0
+
+A second view in the activity bar lists the comments of the file you are reading, stacked as cards.
+
+* Every commented highlight in the active file, in the order it appears, with its colour, snippet and line.
+* Click a card to jump the editor to that highlight.
+* Threads whose text was deleted stay visible, marked as orphaned rather than quietly dropped.
+* Drag the view into the secondary side bar to keep the comments beside your code.
+
+## 0.2.2
+
+Fix the packaged extension including local working directories, which made the download 17 MB instead of 40 KB.
+>>>>>>> origin/main
 
 ## 0.2.1
 

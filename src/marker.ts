@@ -1,8 +1,6 @@
 import * as vscode from "vscode";
-import { buildAnchor } from "./anchors";
 import { HighlightRenderer } from "./decorations";
 import { HighlightCommands, pickColor } from "./highlights";
-import { timestamp } from "./ids";
 import { PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
@@ -96,6 +94,7 @@ export class MarkerMode implements vscode.Disposable {
     }
     this.cancel();
     if (event.selections.every((selection) => selection.isEmpty)) {
+      this.last = undefined;
       return;
     }
     this.timer = setTimeout(() => {
@@ -117,60 +116,62 @@ export class MarkerMode implements vscode.Disposable {
     }
     this.busy = true;
     try {
-      if (await this.extend(editor, ranges)) {
-        return;
-      }
+      await this.replacePrevious(editor, ranges);
       const created = await this.highlights.add(color, ranges);
       if (created.length === 0) {
         this.off();
         void vscode.window.showInformationMessage("CodeLight turned the marker off.");
         return;
       }
-      const first = created[0];
       this.last = {
-        id: first.id,
+        id: created[0].id,
         uri: editor.document.uri.toString(),
         range: ranges[0]
       };
     } finally {
       this.busy = false;
     }
+    this.catchUp(editor, ranges);
   }
 
-  private async extend(editor: vscode.TextEditor, ranges: vscode.Range[]): Promise<boolean> {
+  private async replacePrevious(
+    editor: vscode.TextEditor,
+    ranges: readonly vscode.Range[]
+  ): Promise<void> {
     const previous = this.last;
+    this.last = undefined;
     if (!previous || ranges.length !== 1) {
-      return false;
+      return;
     }
     if (previous.uri !== editor.document.uri.toString()) {
-      return false;
+      return;
     }
-    const grown = ranges[0];
-    if (!grown.contains(previous.range) || grown.isEqual(previous.range)) {
-      return false;
+    const overlap = ranges[0].intersection(previous.range);
+    if (!overlap || !this.store.byId(previous.id)) {
+      return;
     }
-    if (!this.store.byId(previous.id)) {
-      this.last = undefined;
-      return false;
+    await this.store.remove(previous.id);
+  }
+
+  private catchUp(editor: vscode.TextEditor, marked: readonly vscode.Range[]): void {
+    if (!this.color || editor !== vscode.window.activeTextEditor) {
+      return;
     }
-    const text = editor.document.getText();
-    const saved = await this.store.update(previous.id, (current) => ({
-      ...current,
-      updatedAt: timestamp(),
-      range: {
-        startLine: grown.start.line,
-        startCharacter: grown.start.character,
-        endLine: grown.end.line,
-        endCharacter: grown.end.character
-      },
-      anchor: buildAnchor(text, editor.document.offsetAt(grown.start), editor.document.offsetAt(grown.end))
-    }));
-    if (!saved) {
-      this.last = undefined;
-      return false;
+    const current = editor.selections.filter((selection) => !selection.isEmpty);
+    if (current.length === 0) {
+      return;
     }
-    this.last = { id: previous.id, uri: previous.uri, range: grown };
-    return true;
+    const same =
+      current.length === marked.length &&
+      current.every((selection, index) => selection.isEqual(marked[index]));
+    if (same) {
+      return;
+    }
+    this.cancel();
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.mark(editor);
+    }, SETTLE_MS);
   }
 
   dispose(): void {

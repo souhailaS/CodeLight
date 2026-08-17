@@ -8,7 +8,7 @@ const SNIPPET_LENGTH = 50;
 
 export type InlineMode = "off" | "count" | "preview";
 
-function formatDate(iso: string): string {
+export function formatDate(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
 }

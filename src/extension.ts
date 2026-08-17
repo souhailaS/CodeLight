@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { CommentCommands } from "./comments";
 import { HighlightRenderer } from "./decorations";
+import { FileCommentsView } from "./fileview";
 import { HighlightCommands, useSwatches } from "./highlights";
 import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
@@ -8,6 +9,7 @@ import { LiveRanges } from "./live";
 import { MarkerMode } from "./marker";
 import { FileStatus } from "./statusbar";
 import { AnnotationStore } from "./store";
+import { Visibility } from "./visibility";
 import { Swatches } from "./swatches";
 import { ThreadComment, ThreadView } from "./threads";
 
@@ -15,20 +17,23 @@ export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
   const store = new AnnotationStore();
   const live = new LiveRanges(store);
-  const renderer = new HighlightRenderer(store, live);
+  const visibility = new Visibility();
+  const renderer = new HighlightRenderer(store, live, visibility);
   useSwatches(new Swatches(context.globalStorageUri));
   const highlights = new HighlightCommands(store, identity, renderer, live);
   const marker = new MarkerMode(store, renderer, highlights);
   const status = new FileStatus(store);
   const comments = new CommentCommands(store, identity, highlights);
-  const threads = new ThreadView(store, live, identity);
+  const threads = new ThreadView(store, live, identity, visibility);
   const tree = new AnnotationTree(store);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
     treeDataProvider: tree,
     showCollapseAll: true
   });
+  const fileComments = new FileCommentsView(store, live);
   const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
+  void ready.then(() => fileComments.ready());
 
   context.subscriptions.push(
     identity,
@@ -37,6 +42,13 @@ export function activate(context: vscode.ExtensionContext): void {
     renderer,
     marker,
     status,
+    visibility,
+    vscode.commands.registerCommand("codelight.toggleVisibility", () => {
+      visibility.toggle();
+    }),
+    vscode.commands.registerCommand("codelight.showAgain", () => {
+      visibility.toggle();
+    }),
     vscode.commands.registerCommand("codelight.markerOn", async () => {
       await ready;
       await marker.toggle();
@@ -54,6 +66,8 @@ export function activate(context: vscode.ExtensionContext): void {
     threads,
     tree,
     view,
+    fileComments,
+    vscode.window.registerWebviewViewProvider(FileCommentsView.viewId, fileComments),
     vscode.commands.registerCommand("codelight.threadReply", async (reply: vscode.CommentReply) => {
       await ready;
       await threads.reply(reply);

@@ -8,6 +8,7 @@ import { readGutterMode, readPalette } from "./palette";
 import { rescue, withRescue } from "./rescue";
 import { toRelativePath, toUri } from "./paths";
 import { AnnotationStore } from "./store";
+import { Visibility } from "./visibility";
 
 export class ThreadComment implements vscode.Comment {
   savedBody: string;
@@ -54,7 +55,8 @@ export class ThreadView implements vscode.Disposable {
   constructor(
     private readonly store: AnnotationStore,
     private readonly live: LiveRanges,
-    private readonly identity: IdentityProvider
+    private readonly identity: IdentityProvider,
+    private readonly visibility: Visibility
   ) {
     this.controller = vscode.comments.createCommentController("codelight", "CodeLight");
     this.controller.options = {
@@ -74,6 +76,12 @@ export class ThreadView implements vscode.Disposable {
         this.controller.commentingRangeProvider = this.rangeProvider();
       })
     );
+    this.disposables.push(
+      visibility.onDidChange(() => {
+        this.controller.commentingRangeProvider = this.rangeProvider();
+        this.sync();
+      })
+    );
     this.wire();
   }
 
@@ -86,7 +94,7 @@ export class ThreadView implements vscode.Disposable {
           return [];
         }
         const mode = readGutterMode(root);
-        if (mode === "off") {
+        if (mode === "off" || !this.visibility.visible) {
           return [];
         }
         if (mode === "always") {
@@ -123,7 +131,10 @@ export class ThreadView implements vscode.Disposable {
         }
         this.sync();
       }),
-      this.live.onDidShift((document) => this.reposition(document))
+      this.live.onDidShift((document) => {
+        this.controller.commentingRangeProvider = this.rangeProvider();
+        this.reposition(document);
+      })
     );
     this.sync();
   }
@@ -767,7 +778,7 @@ export class ThreadView implements vscode.Disposable {
   private sync(): void {
     const root = this.store.rootUri;
     const wanted = new Map<string, { annotation: Annotation; document: vscode.TextDocument }>();
-    if (root) {
+    if (root && this.visibility.visible) {
       for (const document of vscode.workspace.textDocuments) {
         const relative = toRelativePath(root, document.uri);
         if (!relative) {
