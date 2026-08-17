@@ -4,6 +4,7 @@ import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { Annotation, Author, Comment } from "./model";
 import { toRelativePath } from "./paths";
+import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
 
 const MAX_BODY = 2000;
@@ -60,24 +61,32 @@ export class CommentCommands {
       });
       return true;
     });
+    if (ran && found && saved) {
+      return;
+    }
+    const rescued = await rescue(comment.body);
     if (!ran) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      void vscode.window.showWarningMessage(
+        withRescue("CodeLight could not update the shared file.", rescued)
+      );
       return;
     }
     if (lost) {
       void vscode.window.showWarningMessage(
-        "That highlight lost its text while you were typing, so the comment was not saved."
+        withRescue("That highlight lost its text while you were typing.", rescued)
       );
       return;
     }
     if (!found) {
       await this.store.refresh();
-      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      void vscode.window.showWarningMessage(
+        withRescue("That highlight is no longer in the shared file.", rescued)
+      );
       return;
     }
-    if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
-    }
+    void vscode.window.showWarningMessage(
+      withRescue("CodeLight could not save the comment.", rescued)
+    );
   }
 
   private async compose(author: Author): Promise<Comment | undefined> {
@@ -217,9 +226,7 @@ export class CommentCommands {
           : await this.highlights.pickAtCursor("Comment on highlight", enclosing);
       return picked ? this.live(picked) : undefined;
     }
-    const candidates = this.highlights
-      .atCursor()
-      .filter((entry) => entry.orphaned !== true && !this.highlights.isCollapsed(entry));
+    const candidates = this.highlights.atCursorLive();
     if (candidates.length === 0) {
       return CREATE;
     }
