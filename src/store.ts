@@ -1,3 +1,4 @@
+import { lstat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { gunzip, gzip } from "node:zlib";
 import * as vscode from "vscode";
@@ -60,11 +61,27 @@ async function decodeStore(bytes: Uint8Array, target: vscode.Uri): Promise<strin
   return text.replace(/^\uFEFF/, "");
 }
 
+const BINARY_RULE = "*.json.gz binary";
 const TEMPORARY_NAME = /^codelight\.write-.+\.tmp$/;
 const TEMPORARY_AGE_MS = 10 * 60 * 1000;
 
 function temporaryName(): string {
   return `codelight.write-${newId()}.tmp`;
+}
+
+async function keepsInode(target: vscode.Uri): Promise<boolean> {
+  if (target.scheme !== "file") {
+    return false;
+  }
+  try {
+    const info = await lstat(target.fsPath);
+    if (info.isSymbolicLink() || info.nlink > 1) {
+      return true;
+    }
+    return (info.mode & 0o777) !== (0o666 & ~process.umask());
+  } catch {
+    return false;
+  }
 }
 
 function tooLarge(content: string, target: vscode.Uri): boolean {
@@ -93,6 +110,7 @@ export class AnnotationStore implements vscode.Disposable {
   private reportedFailure: string | undefined;
   private reportedDropped = 0;
   private reportedDuplicate = false;
+  private sweeping = false;
   private generation = 0;
   private active: vscode.Uri | undefined;
 
@@ -221,7 +239,7 @@ export class AnnotationStore implements vscode.Disposable {
     if (generation !== this.generation) {
       return false;
     }
-    return this.enqueue(async () => {
+    const converted = await this.enqueue(async () => {
       if (generation !== this.generation) {
         return false;
       }
@@ -284,6 +302,41 @@ export class AnnotationStore implements vscode.Disposable {
       void vscode.window.showInformationMessage(`CodeLight now stores annotations in ${destination.fsPath}.`);
       return true;
     });
+    if (converted && isCompressed(destination)) {
+      await this.offerBinaryRule(destination);
+    }
+    return converted;
+  }
+
+  private async offerBinaryRule(destination: vscode.Uri): Promise<void> {
+    const attributes = vscode.Uri.joinPath(destination, "..", "..", ".gitattributes");
+    let current = "";
+    try {
+      current = Buffer.from(await vscode.workspace.fs.readFile(attributes)).toString("utf8");
+    } catch (error) {
+      if (!isMissingFile(error)) {
+        return;
+      }
+    }
+    if (current.includes(BINARY_RULE)) {
+      return;
+    }
+    const answer = await vscode.window.showInformationMessage(
+      `Add ${BINARY_RULE} to ${attributes.fsPath} so git never rewrites the compressed store?`,
+      "Add"
+    );
+    if (answer !== "Add") {
+      return;
+    }
+    const separator = current === "" || current.endsWith("\n") ? "" : "\n";
+    try {
+      await vscode.workspace.fs.writeFile(
+        attributes,
+        Buffer.from(`${current}${separator}${BINARY_RULE}\n`, "utf8")
+      );
+    } catch (error) {
+      this.reportFailure(`CodeLight could not update ${attributes.fsPath}. ${describe(error)}`);
+    }
   }
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -316,11 +369,18 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   private resolve(files: StoreFiles, hasPlain: boolean, hasCompressed: boolean): Outcome {
-    if (hasPlain && this.active?.toString() === files.plain.toString()) {
-      return { target: files.plain, duplicate: hasCompressed };
+    if (hasPlain && hasCompressed) {
+      const active = this.active?.toString();
+      if (active === files.plain.toString()) {
+        return { target: files.plain, duplicate: true };
+      }
+      if (active === files.compressed.toString()) {
+        return { target: files.compressed, duplicate: true };
+      }
+      return { target: files.fresh, duplicate: true };
     }
     if (hasCompressed) {
-      return { target: files.compressed, duplicate: hasPlain };
+      return { target: files.compressed, duplicate: false };
     }
     if (hasPlain) {
       return { target: files.plain, duplicate: false };
@@ -404,7 +464,7 @@ export class AnnotationStore implements vscode.Disposable {
       this.lastSerialized = content;
       this.reportedFailure = undefined;
       this.emitter.fire();
-      await this.sweep(vscode.Uri.joinPath(target, "..", ".."));
+      void this.sweep(vscode.Uri.joinPath(target, "..", ".."));
       return true;
     });
   }
@@ -534,8 +594,12 @@ export class AnnotationStore implements vscode.Disposable {
   private async writeStore(target: vscode.Uri, content: string): Promise<void> {
     const bytes = await encodeStore(content, target);
     const folder = vscode.Uri.joinPath(target, "..");
-    const temporary = vscode.Uri.joinPath(folder, temporaryName());
     await vscode.workspace.fs.createDirectory(folder);
+    if (await keepsInode(target)) {
+      await vscode.workspace.fs.writeFile(target, bytes);
+      return;
+    }
+    const temporary = vscode.Uri.joinPath(folder, temporaryName());
     try {
       await vscode.workspace.fs.writeFile(temporary, bytes);
       await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
@@ -555,6 +619,18 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   private async sweep(root: vscode.Uri): Promise<void> {
+    if (this.sweeping) {
+      return;
+    }
+    this.sweeping = true;
+    try {
+      await this.removeStaleTemporaries(root);
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
+  private async removeStaleTemporaries(root: vscode.Uri): Promise<void> {
     const folder = vscode.Uri.joinPath(root, ".vscode");
     let entries: [string, vscode.FileType][];
     try {
