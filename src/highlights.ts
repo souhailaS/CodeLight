@@ -142,9 +142,10 @@ export class HighlightCommands {
     }
     const position = editor.selection.active;
     const spans = this.live.spansFor(editor.document);
-    return this.store
-      .forFile(relative)
-      .filter((annotation) => this.live.rangeFor(editor.document, annotation, spans).contains(position));
+    return this.store.forFile(relative).filter((annotation) => {
+      const range = this.live.rangeFor(editor.document, annotation, spans);
+      return range.isEmpty ? range.start.line === position.line : range.contains(position);
+    });
   }
 
   async pickAtCursor(title: string): Promise<Annotation | undefined> {
@@ -156,12 +157,19 @@ export class HighlightCommands {
     if (candidates.length === 1) {
       return candidates[0];
     }
+    const editor = vscode.window.activeTextEditor;
+    const spans = editor ? this.live.spansFor(editor.document) : undefined;
     const picked = await vscode.window.showQuickPick(
-      candidates.map((annotation) => ({
-        label: snippet(annotation),
-        description: `${annotation.color} by ${annotation.author.login}`,
-        annotation
-      })),
+      candidates.map((annotation) => {
+        const orphan =
+          editor !== undefined &&
+          this.live.rangeFor(editor.document, annotation, spans).isEmpty;
+        return {
+          label: orphan ? `${snippet(annotation)} (text deleted)` : snippet(annotation),
+          description: `${annotation.color} by ${annotation.author.login}`,
+          annotation
+        };
+      }),
       { title }
     );
     return picked?.annotation;
