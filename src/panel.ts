@@ -288,7 +288,7 @@ export class PanelCommands {
     if (missing) {
       await this.store.refresh();
     }
-    if (!saved && !removed) {
+    if (!saved && !removed && missing) {
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
       return;
     }

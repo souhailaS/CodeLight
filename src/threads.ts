@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
-import { buildAnchor } from "./anchors";
+import { buildAnchor, findAnchor } from "./anchors";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
-import { Annotation, Comment, MAX_COMMENT_BODY } from "./model";
+import { Anchor, Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { readPalette } from "./palette";
 import { toRelativePath, toUri } from "./paths";
 import { AnnotationStore } from "./store";
@@ -47,7 +47,7 @@ export class ThreadView implements vscode.Disposable {
   private readonly threads = new Map<string, vscode.CommentThread>();
   private readonly owners = new Map<vscode.CommentThread, string>();
   private readonly drafts = new Set<string>();
-  private readonly pending = new Set<vscode.CommentThread>();
+  private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number }>();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -146,7 +146,7 @@ export class ThreadView implements vscode.Disposable {
 
   discard(thread?: vscode.CommentThread): void {
     if (!thread) {
-      for (const entry of this.pending) {
+      for (const entry of this.pending.keys()) {
         entry.dispose();
       }
       this.pending.clear();
@@ -158,7 +158,11 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const owned = this.owners.get(thread);
-    if (owned !== undefined && thread.comments.length === 0) {
+    if (owned === undefined) {
+      thread.dispose();
+      return;
+    }
+    if (thread.comments.length === 0) {
       this.drafts.delete(owned);
       this.owners.delete(thread);
       this.threads.delete(owned);
@@ -215,15 +219,29 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const now = timestamp();
-    const saved = await this.store.update(comment.annotationId, (current) => ({
-      ...current,
-      updatedAt: now,
-      comments: current.comments.map((entry) =>
-        entry.id === comment.commentId ? { ...entry, body, updatedAt: now } : entry
-      )
-    }));
+    let found = false;
+    const saved = await this.store.transaction((annotations) => {
+      const current = annotations.get(comment.annotationId);
+      if (!current || !current.comments.some((entry) => entry.id === comment.commentId)) {
+        return false;
+      }
+      found = true;
+      annotations.set(comment.annotationId, {
+        ...current,
+        updatedAt: now,
+        comments: current.comments.map((entry) =>
+          entry.id === comment.commentId ? { ...entry, body, updatedAt: now } : entry
+        )
+      });
+      return true;
+    });
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
+      await vscode.env.clipboard.writeText(body).then(undefined, () => undefined);
+      void vscode.window.showWarningMessage(
+        found
+          ? "CodeLight could not save the comment. It was copied to the clipboard."
+          : "That comment is no longer in the shared file. Your text was copied to the clipboard."
+      );
       return;
     }
     if (edited instanceof ThreadComment) {
@@ -282,15 +300,26 @@ export class ThreadView implements vscode.Disposable {
         "CodeLight comments on one selection at a time. Using the first one."
       );
     }
-    for (const entry of this.pending) {
-      entry.dispose();
+    if (this.pending.size > 0) {
+      void vscode.window.showInformationMessage("Closed the note you had open.");
+      for (const entry of this.pending.keys()) {
+        entry.dispose();
+      }
+      this.pending.clear();
     }
-    this.pending.clear();
+    const text = editor.document.getText();
     const thread = this.controller.createCommentThread(editor.document.uri, range, []);
     thread.label = "New CodeLight note";
     thread.contextValue = "codelight";
     thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    this.pending.add(thread);
+    this.pending.set(thread, {
+      anchor: buildAnchor(
+        text,
+        editor.document.offsetAt(range.start),
+        editor.document.offsetAt(range.end)
+      ),
+      version: editor.document.version
+    });
     editor.selection = new vscode.Selection(range.start, range.start);
     await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
   }
@@ -298,7 +327,11 @@ export class ThreadView implements vscode.Disposable {
   async open(annotationId: string): Promise<void> {
     const annotation = this.store.byId(annotationId);
     const root = this.store.rootUri;
-    if (!annotation || !root) {
+    if (!annotation) {
+      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      return;
+    }
+    if (!root) {
       return;
     }
     if (annotation.orphaned === true) {
@@ -359,9 +392,20 @@ export class ThreadView implements vscode.Disposable {
     } catch {
       return undefined;
     }
+    const draft = this.pending.get(thread);
     const requested = thread.range;
     let range: vscode.Range;
-    if (requested && !requested.isEmpty) {
+    if (draft && document.version !== draft.version) {
+      const found = findAnchor(document.getText(), draft.anchor);
+      if (!found) {
+        await vscode.env.clipboard.writeText(comment.body).then(undefined, () => undefined);
+        void vscode.window.showWarningMessage(
+          "The file changed and the selection could not be found again. Your comment was copied to the clipboard."
+        );
+        return undefined;
+      }
+      range = new vscode.Range(document.positionAt(found.start), document.positionAt(found.end));
+    } else if (requested && !requested.isEmpty) {
       range = document.validateRange(requested);
     } else {
       const anchorLine = requested ? requested.start.line : 0;
@@ -502,7 +546,7 @@ export class ThreadView implements vscode.Disposable {
     for (const thread of this.threads.values()) {
       thread.dispose();
     }
-    for (const thread of this.pending) {
+    for (const thread of this.pending.keys()) {
       thread.dispose();
     }
     this.pending.clear();

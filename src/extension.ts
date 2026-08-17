@@ -130,9 +130,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (located.kind === "draft") {
         const editor = vscode.window.activeTextEditor;
-        if (editor) {
-          await threads.openDraft(editor);
+        if (!editor) {
+          void vscode.window.showWarningMessage("Open a file to comment on.");
+          return;
         }
+        await threads.openDraft(editor);
       }
     }),
     vscode.commands.registerCommand("codelight.editComment", async (target?: unknown) => {

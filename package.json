@@ -142,7 +142,7 @@
       },
       {
         "command": "codelight.threadDiscard",
-        "title": "Discard",
+        "title": "Close",
         "category": "CodeLight",
         "icon": "$(close)"
       }
