@@ -1,18 +1,32 @@
 import * as vscode from "vscode";
+import { IdentityProvider } from "./identity";
+import { AnnotationStore } from "./store";
 
 export function activate(context: vscode.ExtensionContext): void {
+  const identity = new IdentityProvider();
+  const store = new AnnotationStore();
+  const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
+
   context.subscriptions.push(
-    vscode.commands.registerCommand("codelight.showStatus", () => {
-      const active = vscode.window.activeTextEditor;
-      const activeFolder = active
-        ? vscode.workspace.getWorkspaceFolder(active.document.uri)
-        : undefined;
-      const folder = activeFolder ?? vscode.workspace.workspaceFolders?.[0];
-      if (!folder) {
+    identity,
+    store,
+    vscode.commands.registerCommand("codelight.signIn", async () => {
+      const account = await identity.require();
+      if (account) {
+        void vscode.window.showInformationMessage(`CodeLight is signed in as ${account.login}.`);
+      }
+    }),
+    vscode.commands.registerCommand("codelight.showStatus", async () => {
+      await ready;
+      if (!store.isReady) {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
       }
-      void vscode.window.showInformationMessage(`CodeLight is active in ${folder.name}.`);
+      const account = identity.identity;
+      const who = account ? account.login : "nobody";
+      void vscode.window.showInformationMessage(
+        `CodeLight tracks ${store.all.length} annotations, signed in as ${who}.`
+      );
     })
   );
 }
