@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+Fix the packaged extension including local working directories, which made the download 17 MB instead of 40 KB.
+
 ## 0.2.1
 
 * Refuse to place a note when the file changed and its text cannot be found again, instead of attaching it to whatever moved into those coordinates.
