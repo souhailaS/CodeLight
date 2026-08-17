@@ -21,7 +21,6 @@ export class MarkerMode implements vscode.Disposable {
   private color: PaletteColor | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private busy = false;
-  private misses = 0;
   private last: Marked | undefined;
 
   constructor(
@@ -54,6 +53,14 @@ export class MarkerMode implements vscode.Disposable {
       this.off();
       return;
     }
+    const editor = vscode.window.activeTextEditor;
+    const root = this.store.rootUri;
+    if (!editor || !root || !toRelativePath(root, editor.document.uri)) {
+      void vscode.window.showWarningMessage(
+        "Open a file inside the workspace folder to use the marker."
+      );
+      return;
+    }
     const author = await this.identity.require();
     if (!author) {
       return;
@@ -65,7 +72,6 @@ export class MarkerMode implements vscode.Disposable {
     this.visibility.show();
     this.color = picked;
     this.last = undefined;
-    this.misses = 0;
     this.status.text = `$(edit) Marker ${picked.label}`;
     this.status.tooltip = "CodeLight marker is on. Select text to highlight it. Click to turn off.";
     this.status.show();
@@ -144,18 +150,7 @@ export class MarkerMode implements vscode.Disposable {
     this.busy = true;
     try {
       const created = await this.highlights.add(color, ranges, editor);
-      if (created.length === 0) {
-        this.misses += 1;
-        if (this.misses >= 3) {
-          this.off();
-          void vscode.window.showInformationMessage(
-            "CodeLight turned the marker off after three highlights could not be saved."
-          );
-        }
-      } else {
-        this.misses = 0;
-      }
-      if (created.length > 0 && this.color) {
+      if (created.length > 0 && this.color && editor === vscode.window.activeTextEditor) {
         await this.dropPrevious(previous, editor, ranges);
         this.last =
           this.color && ranges.length === 1

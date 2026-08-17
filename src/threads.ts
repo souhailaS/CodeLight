@@ -85,6 +85,7 @@ export class ThreadView implements vscode.Disposable {
     );
     this.disposables.push(
       visibility.onDidChange((shown) => {
+        const closed = this.threads.size;
         this.controller.commentingRangeProvider = this.rangeProvider();
         this.sync();
         if (shown) {
@@ -92,6 +93,10 @@ export class ThreadView implements vscode.Disposable {
         }
         if (this.pending.size > 0) {
           void vscode.window.showInformationMessage("The note you are writing stays open.");
+        } else if (closed > 0) {
+          void vscode.window.showInformationMessage(
+            closed === 1 ? "One comment thread was closed." : `${closed} comment threads were closed.`
+          );
         }
       })
     );

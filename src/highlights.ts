@@ -73,7 +73,7 @@ export class HighlightCommands {
     const ranges: vscode.Range[] = [];
     let skipped = 0;
     const sources = only ?? editor.selections;
-    const taken = this.markedRanges(editor, relative);
+    const taken = only === undefined ? [] : this.markedRanges(editor, relative);
     for (const selection of sources) {
       const range = selection.isEmpty
         ? editor.document.lineAt(selection.start.line).range
