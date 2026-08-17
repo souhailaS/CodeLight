@@ -51,6 +51,9 @@ export class HighlightRenderer implements vscode.Disposable {
       grouped.set(key, []);
     }
     for (const annotation of annotations) {
+      if (annotation.orphaned === true) {
+        continue;
+      }
       const key = this.types.has(annotation.color)
         ? annotation.color
         : resolveColor(this.palette, annotation.color).id;

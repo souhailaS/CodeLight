@@ -71,6 +71,7 @@ export class LiveRanges implements vscode.Disposable {
       return;
     }
     const moved = new Map<string, Placement>();
+    const orphaned = new Set<string>();
     for (const annotation of this.store.forFile(relative)) {
       const span = state.spans.get(annotation.id);
       const placement = state.placements.get(annotation.id);
@@ -78,15 +79,18 @@ export class LiveRanges implements vscode.Disposable {
         continue;
       }
       if (span.start === span.end) {
+        if (annotation.orphaned !== true) {
+          orphaned.add(annotation.id);
+        }
         continue;
       }
       const current = this.spanOf(document, annotation);
-      if (current.start === span.start && current.end === span.end) {
+      if (current.start === span.start && current.end === span.end && annotation.orphaned !== true) {
         continue;
       }
       moved.set(annotation.id, placement);
     }
-    if (moved.size === 0) {
+    if (moved.size === 0 && orphaned.size === 0) {
       this.holding.delete(key);
       return;
     }
@@ -99,6 +103,7 @@ export class LiveRanges implements vscode.Disposable {
         }
         annotations.set(id, {
           ...annotation,
+          orphaned: undefined,
           range: {
             startLine: placement.start.line,
             startCharacter: placement.start.character,
@@ -108,9 +113,19 @@ export class LiveRanges implements vscode.Disposable {
         });
         changed = true;
       }
+      for (const id of orphaned) {
+        const annotation = annotations.get(id);
+        if (!annotation) {
+          continue;
+        }
+        annotations.set(id, { ...annotation, orphaned: true });
+        changed = true;
+      }
       return changed;
     });
-    const stillPresent = [...moved.keys()].some((id) => this.store.byId(id) !== undefined);
+    const stillPresent = [...moved.keys(), ...orphaned].some(
+      (id) => this.store.byId(id) !== undefined
+    );
     if (saved || !stillPresent) {
       this.holding.delete(key);
     }
@@ -218,6 +233,11 @@ export class LiveRanges implements vscode.Disposable {
   }
 
   private afterShift(document: vscode.TextDocument): void {
+    if (!document.isDirty) {
+      this.forget(document);
+      this.changeEmitter.fire(document);
+      return;
+    }
     this.holding.add(document.uri.toString());
     this.changeEmitter.fire(document);
   }

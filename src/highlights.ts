@@ -12,10 +12,9 @@ const ANCHOR_CONTEXT = 60;
 const MAX_ANCHOR_TEXT = 400;
 const SNIPPET_LENGTH = 50;
 
-function buildAnchor(document: vscode.TextDocument, range: vscode.Range): Anchor {
+function buildAnchor(document: vscode.TextDocument, range: vscode.Range, whole: string): Anchor {
   const offset = document.offsetAt(range.start);
   const endOffset = document.offsetAt(range.end);
-  const whole = document.getText();
   return {
     text: whole.slice(offset, endOffset).slice(0, MAX_ANCHOR_TEXT),
     before: whole.slice(Math.max(0, offset - ANCHOR_CONTEXT), offset),
@@ -87,9 +86,10 @@ export class HighlightCommands {
       const range = selection.isEmpty
         ? editor.document.lineAt(selection.active.line).range
         : new vscode.Range(selection.start, selection.end);
-      if (!range.isEmpty) {
-        ranges.push(range);
+      if (range.isEmpty || ranges.some((existing) => existing.isEqual(range))) {
+        continue;
       }
+      ranges.push(range);
     }
     if (ranges.length === 0) {
       void vscode.window.showWarningMessage(
@@ -99,7 +99,8 @@ export class HighlightCommands {
       );
       return [];
     }
-    const anchors = ranges.map((range) => buildAnchor(editor.document, range));
+    const text = editor.document.getText();
+    const anchors = ranges.map((range) => buildAnchor(editor.document, range, text));
     const version = editor.document.version;
     const author = await this.identity.require();
     if (!author) {
@@ -158,6 +159,9 @@ export class HighlightCommands {
     const position = editor.selection.active;
     const spans = this.live.spansFor(editor.document);
     return this.store.forFile(relative).filter((annotation) => {
+      if (annotation.orphaned === true) {
+        return annotation.range.startLine === position.line;
+      }
       const range = this.live.rangeFor(editor.document, annotation, spans);
       return range.isEmpty ? range.start.line === position.line : range.contains(position);
     });
@@ -172,7 +176,8 @@ export class HighlightCommands {
     const editor = vscode.window.activeTextEditor;
     const spans = editor ? this.live.spansFor(editor.document) : undefined;
     const isOrphan = (annotation: Annotation): boolean =>
-      editor !== undefined && this.live.rangeFor(editor.document, annotation, spans).isEmpty;
+      annotation.orphaned === true ||
+      (editor !== undefined && this.live.rangeFor(editor.document, annotation, spans).isEmpty);
     if (candidates.length === 1 && !isOrphan(candidates[0])) {
       return candidates[0];
     }

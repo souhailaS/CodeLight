@@ -36,6 +36,7 @@ export interface Annotation {
   createdAt: string;
   updatedAt: string;
   comments: Comment[];
+  orphaned?: boolean;
   rejectedComments?: unknown[];
 }
 
@@ -158,6 +159,7 @@ function parseAnnotation(value: unknown, dropped: DropCounter): Annotation | und
     author,
     createdAt,
     updatedAt: readString(value.updatedAt, createdAt),
+    orphaned: value.orphaned === true ? true : undefined,
     comments,
     rejectedComments
   };
