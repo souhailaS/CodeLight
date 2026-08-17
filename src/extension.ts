@@ -6,6 +6,7 @@ import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
 import { AnnotationStore } from "./store";
+import { ThreadComment, ThreadView } from "./threads";
 
 export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
@@ -14,6 +15,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const renderer = new HighlightRenderer(store, live);
   const highlights = new HighlightCommands(store, identity, renderer, live);
   const comments = new CommentCommands(store, identity, highlights);
+  const threads = new ThreadView(store, live, identity);
   const tree = new AnnotationTree(store);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
@@ -27,8 +29,25 @@ export function activate(context: vscode.ExtensionContext): void {
     store,
     live,
     renderer,
+    threads,
     tree,
     view,
+    vscode.commands.registerCommand("codelight.threadReply", async (reply: vscode.CommentReply) => {
+      await ready;
+      await threads.reply(reply);
+    }),
+    vscode.commands.registerCommand("codelight.threadEdit", (comment: ThreadComment) => {
+      threads.edit(comment);
+    }),
+    vscode.commands.registerCommand("codelight.threadSave", async (comment: ThreadComment) => {
+      await threads.saveEdit(comment);
+    }),
+    vscode.commands.registerCommand("codelight.threadCancel", (comment: ThreadComment) => {
+      threads.cancelEdit(comment);
+    }),
+    vscode.commands.registerCommand("codelight.threadDelete", async (comment: ThreadComment) => {
+      await threads.deleteComment(comment);
+    }),
     vscode.commands.registerCommand("codelight.showPanel", async () => {
       await vscode.commands.executeCommand("codelight.annotations.focus");
     }),
@@ -79,11 +98,17 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("codelight.addComment", async () => {
       await ready;
-      await comments.add();
+      const target = await comments.locate();
+      if (target !== undefined) {
+        await threads.open(target);
+      }
     }),
     vscode.commands.registerCommand("codelight.reply", async (target?: unknown) => {
       await ready;
-      await comments.add(nodeId(target));
+      const id = nodeId(target) ?? (await comments.locate());
+      if (id !== undefined) {
+        await threads.open(id);
+      }
     }),
     vscode.commands.registerCommand("codelight.editComment", async (target?: unknown) => {
       await ready;

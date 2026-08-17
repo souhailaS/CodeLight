@@ -46,6 +46,7 @@ export class ThreadView implements vscode.Disposable {
   private readonly controller: vscode.CommentController;
   private readonly threads = new Map<string, vscode.CommentThread>();
   private readonly owners = new Map<vscode.CommentThread, string>();
+  private readonly drafts = new Set<string>();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -115,6 +116,7 @@ export class ThreadView implements vscode.Disposable {
         return;
       }
     }
+    this.drafts.delete(annotationId);
     reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.sync();
   }
@@ -208,13 +210,31 @@ export class ThreadView implements vscode.Disposable {
     if (!uri) {
       return;
     }
-    const document = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(document, { preserveFocus: false });
+    let document: vscode.TextDocument;
+    try {
+      document = await vscode.workspace.openTextDocument(uri);
+    } catch {
+      void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
+      return;
+    }
+    let editor: vscode.TextEditor;
+    try {
+      editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+    } catch {
+      void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
+      return;
+    }
+    if (annotation.comments.length === 0) {
+      this.drafts.add(annotationId);
+    }
     this.sync();
-    const thread = this.threads.get(annotationId) ?? this.attach(document, annotation);
+    const thread = this.threads.get(annotationId);
     if (!thread) {
       return;
     }
+    const range = this.live.rangeFor(document, annotation);
+    editor.selection = new vscode.Selection(range.start, range.start);
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
   }
@@ -307,7 +327,10 @@ export class ThreadView implements vscode.Disposable {
           continue;
         }
         for (const annotation of this.store.forFile(relative)) {
-          if (annotation.comments.length > 0 && annotation.orphaned !== true) {
+          if (annotation.orphaned === true) {
+            continue;
+          }
+          if (annotation.comments.length > 0 || this.drafts.has(annotation.id)) {
             wanted.set(annotation.id, { annotation, document });
           }
         }
@@ -316,8 +339,15 @@ export class ThreadView implements vscode.Disposable {
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
         this.owners.delete(thread);
+        this.drafts.delete(id);
         thread.dispose();
         this.threads.delete(id);
+      }
+    }
+    for (const id of [...this.drafts]) {
+      const annotation = this.store.byId(id);
+      if (!annotation || annotation.comments.length > 0) {
+        this.drafts.delete(id);
       }
     }
     for (const [id, entry] of wanted) {
@@ -352,6 +382,7 @@ export class ThreadView implements vscode.Disposable {
     }
     this.threads.clear();
     this.owners.clear();
+    this.drafts.clear();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }

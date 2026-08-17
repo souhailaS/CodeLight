@@ -22,6 +22,18 @@ export class CommentCommands {
     private readonly highlights: HighlightCommands
   ) {}
 
+  async locate(): Promise<string | undefined> {
+    const target = await this.target();
+    if (target === undefined) {
+      return undefined;
+    }
+    if (target !== CREATE) {
+      return target.id;
+    }
+    const created = await this.highlights.add();
+    return created[0]?.id;
+  }
+
   async add(annotationId?: string): Promise<void> {
     const target = await this.target(annotationId);
     if (target === undefined) {

@@ -112,6 +112,33 @@
         "title": "Delete All Orphaned Highlights",
         "category": "CodeLight",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "codelight.threadReply",
+        "title": "Comment",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.threadEdit",
+        "title": "Edit",
+        "category": "CodeLight",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codelight.threadSave",
+        "title": "Save",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.threadCancel",
+        "title": "Cancel",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.threadDelete",
+        "title": "Delete",
+        "category": "CodeLight",
+        "icon": "$(trash)"
       }
     ],
     "keybindings": [
@@ -148,6 +175,26 @@
         },
         {
           "command": "codelight.deleteAnnotation",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadReply",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadEdit",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadSave",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadCancel",
+          "when": "false"
+        },
+        {
+          "command": "codelight.threadDelete",
           "when": "false"
         }
       ],
@@ -207,6 +254,37 @@
           "command": "codelight.deleteFileHighlights",
           "when": "view == codelight.annotations && viewItem == codelight.file",
           "group": "inline@1"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "codelight.threadReply",
+          "group": "inline",
+          "when": "commentController == codelight"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "codelight.threadEdit",
+          "group": "group@1",
+          "when": "commentController == codelight && comment == mine"
+        },
+        {
+          "command": "codelight.threadDelete",
+          "group": "group@2",
+          "when": "commentController == codelight && comment == mine"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "codelight.threadCancel",
+          "group": "inline@1",
+          "when": "commentController == codelight"
+        },
+        {
+          "command": "codelight.threadSave",
+          "group": "inline@2",
+          "when": "commentController == codelight"
         }
       ]
     },
