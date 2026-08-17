@@ -205,9 +205,50 @@ export class HighlightCommands {
     }
   }
 
+  async removeOrphaned(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    const root = this.store.rootUri;
+    const relative = editor && root ? toRelativePath(root, editor.document.uri) : undefined;
+    if (!relative) {
+      void vscode.window.showWarningMessage("Open a tracked file to clean up its highlights.");
+      return;
+    }
+    const orphans = this.store.forFile(relative).filter((annotation) => annotation.orphaned === true);
+    if (orphans.length === 0) {
+      void vscode.window.showInformationMessage("No orphaned highlights in this file.");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      orphans.map((annotation) => ({
+        label: snippet(annotation),
+        description: `line ${annotation.range.startLine + 1} by ${annotation.author.login}`,
+        picked: true,
+        annotation
+      })),
+      { title: "Remove orphaned highlights", canPickMany: true }
+    );
+    if (!picked || picked.length === 0) {
+      return;
+    }
+    const ids = new Set(picked.map((item) => item.annotation.id));
+    await this.store.transaction((annotations) => {
+      let changed = false;
+      for (const id of ids) {
+        changed = annotations.delete(id) || changed;
+      }
+      return changed;
+    });
+  }
+
   async recolor(): Promise<void> {
     const annotation = await this.pickAtCursor("Change highlight color");
     if (!annotation) {
+      return;
+    }
+    if (annotation.orphaned === true) {
+      void vscode.window.showWarningMessage(
+        "That highlight lost its text. Remove it instead of recoloring it."
+      );
       return;
     }
     const color = await pickColor(this.renderer.colors, "Change highlight color");

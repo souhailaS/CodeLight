@@ -73,19 +73,20 @@ export class LiveRanges implements vscode.Disposable {
     const moved = new Map<string, Placement>();
     const orphaned = new Set<string>();
     for (const annotation of this.store.forFile(relative)) {
+      if (annotation.orphaned === true) {
+        continue;
+      }
       const span = state.spans.get(annotation.id);
       const placement = state.placements.get(annotation.id);
       if (!span || !placement) {
         continue;
       }
       if (span.start === span.end) {
-        if (annotation.orphaned !== true) {
-          orphaned.add(annotation.id);
-        }
+        orphaned.add(annotation.id);
         continue;
       }
       const current = this.spanOf(document, annotation);
-      if (current.start === span.start && current.end === span.end && annotation.orphaned !== true) {
+      if (current.start === span.start && current.end === span.end) {
         continue;
       }
       moved.set(annotation.id, placement);
@@ -103,7 +104,6 @@ export class LiveRanges implements vscode.Disposable {
         }
         annotations.set(id, {
           ...annotation,
-          orphaned: undefined,
           range: {
             startLine: placement.start.line,
             startCharacter: placement.start.character,
@@ -154,13 +154,18 @@ export class LiveRanges implements vscode.Disposable {
     if (!existing || (!document.isDirty && !this.holding.has(key))) {
       const state: DocumentState = { spans: new Map(), placements: new Map(), eol: document.eol };
       for (const annotation of stored) {
+        if (annotation.orphaned === true) {
+          continue;
+        }
         state.spans.set(annotation.id, this.spanOf(document, annotation));
       }
       this.refreshPlacements(document, state);
       this.documents.set(key, state);
       return state;
     }
-    const ids = new Set(stored.map((annotation) => annotation.id));
+    const ids = new Set(
+      stored.filter((annotation) => annotation.orphaned !== true).map((annotation) => annotation.id)
+    );
     for (const id of [...existing.spans.keys()]) {
       if (!ids.has(id)) {
         existing.spans.delete(id);
@@ -168,7 +173,7 @@ export class LiveRanges implements vscode.Disposable {
       }
     }
     for (const annotation of stored) {
-      if (!existing.spans.has(annotation.id)) {
+      if (annotation.orphaned !== true && !existing.spans.has(annotation.id)) {
         const span = this.spanOf(document, annotation);
         existing.spans.set(annotation.id, span);
         existing.placements.set(annotation.id, {

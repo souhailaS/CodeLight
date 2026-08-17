@@ -36,6 +36,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await ready;
       await highlights.recolor();
     }),
+    vscode.commands.registerCommand("codelight.removeOrphaned", async () => {
+      await ready;
+      await highlights.removeOrphaned();
+    }),
     vscode.commands.registerCommand("codelight.showStatus", async () => {
       await ready;
       if (!store.isReady) {

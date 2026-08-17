@@ -45,6 +45,11 @@
         "command": "codelight.changeColor",
         "title": "Change Highlight Color",
         "category": "CodeLight"
+      },
+      {
+        "command": "codelight.removeOrphaned",
+        "title": "Remove Orphaned Highlights",
+        "category": "CodeLight"
       }
     ],
     "keybindings": [

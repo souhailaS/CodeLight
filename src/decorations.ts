@@ -8,6 +8,7 @@ export class HighlightRenderer implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private types = new Map<string, vscode.TextEditorDecorationType>();
   private palette: PaletteColor[] = [];
+  private paletteRoot: string | undefined;
 
   constructor(
     private readonly store: AnnotationStore,
@@ -15,7 +16,12 @@ export class HighlightRenderer implements vscode.Disposable {
   ) {
     this.rebuild();
     this.disposables.push(
-      store.onDidChange(() => this.renderAll()),
+      store.onDidChange(() => {
+        if (this.paletteRoot !== this.store.rootUri?.toString()) {
+          this.rebuild();
+        }
+        this.renderAll();
+      }),
       live.onDidShift((document) => this.renderDocument(document)),
       vscode.window.onDidChangeVisibleTextEditors(() => this.renderAll()),
       vscode.workspace.onDidChangeConfiguration((event) => {
@@ -84,6 +90,7 @@ export class HighlightRenderer implements vscode.Disposable {
     }
     this.types = new Map();
     const resource = this.store.rootUri;
+    this.paletteRoot = resource?.toString();
     this.palette = readPalette(resource);
     const opacity = readOpacity(resource);
     for (const color of this.palette) {
