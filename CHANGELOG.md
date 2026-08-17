@@ -3,8 +3,8 @@
 ## 0.2.1
 
 * Refuse to place a note when the file changed and its text cannot be found again, instead of attaching it to whatever moved into those coordinates.
-* Ask before closing a note you have typed into, including notes opened on an existing highlight.
-* Copy your text to the clipboard on every path where a note is dropped.
+* Copy your text to the clipboard when a note is closed or dropped, wherever the text is reachable.
+* Stop closing another open note behind your back. Close a note yourself with the Close button.
 
 ## 0.2.0
 
