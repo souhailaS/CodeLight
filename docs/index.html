@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodeLight</title>
+<meta name="description" content="Shared highlights and comments for VS Code, kept beside your code instead of inside it." />
+<link rel="icon" href="icon.png" />
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f6f7f9;
+    --line: #e3e6ec;
+    --ink: #1b1f2a;
+    --muted: #5c6580;
+    --mark: #ffb74d;
+    --accent: #2f7fd4;
+    --code: #f2f3f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151d;
+      --panel: #191d28;
+      --line: #262c3a;
+      --ink: #e7e9ee;
+      --muted: #9aa3b8;
+      --mark: #ffc766;
+      --accent: #64b5f6;
+      --code: #1d222e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 72px 0 48px; }
+  .logo { width: 84px; height: 84px; border-radius: 19px; display: block; }
+  h1 { font-size: 40px; letter-spacing: -0.02em; margin: 24px 0 8px; }
+  .tagline { font-size: 20px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
+  .mark { background: var(--mark); color: #1b1f2a; border-radius: 3px; padding: 1px 4px; }
+  .buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 10px 18px; border-radius: 8px; text-decoration: none;
+    font-weight: 600; font-size: 15px; border: 1px solid var(--line); color: var(--ink);
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+  section { padding: 8px 0 40px; }
+  h2 { font-size: 22px; letter-spacing: -0.01em; margin: 40px 0 12px; }
+  p { margin: 0 0 16px; }
+  .lede p { font-size: 17px; }
+  ul { padding-left: 20px; margin: 0 0 16px; }
+  li { margin: 0 0 10px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 20px 0 8px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  pre {
+    background: var(--code); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+  }
+  code { font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin: 0 0 16px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  kbd {
+    font-family: inherit; font-size: 13px; background: var(--panel);
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px;
+  }
+  footer { border-top: 1px solid var(--line); margin-top: 32px; padding: 24px 0 64px; color: var(--muted); font-size: 14px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <img class="logo" src="icon.png" alt="CodeLight" />
+  <h1>CodeLight</h1>
+  <p class="tagline">Shared <span class="mark">highlights and comments</span> for VS Code, kept beside your code instead of inside it.</p>
+  <div class="buttons">
+    <a class="btn primary" href="https://github.com/souhailaS/CodeLight">View on GitHub</a>
+    <a class="btn" href="#install">Install</a>
+  </div>
+</header>
+
+<section class="lede">
+  <h2>Why</h2>
+  <p>VS Code stopped being only a code editor a long time ago. People draft documents in it, read specifications in it, and work through unfamiliar repositories in it, and almost all of that time is spent reading rather than typing.</p>
+  <p>That balance tipped further once code started arriving generated, with its comments already written. The typing is increasingly done for us, so what is left is reading, deciding whether what came back is right, and saying what should happen next. We now spend relatively more time reading code than writing it.</p>
+  <p>Generated comments explain what the code does. They say nothing about what you noticed while reading it, what looked wrong, or what you wanted a colleague to confirm.</p>
+  <p>Reading notes have nowhere good to live today. Put them in the source and they become part of the product, they show up in everyone's diff, and someone has to remember to take them out. Put them in a pull request and they are trapped in a branch that may sit unmerged for weeks, invisible to anyone not reviewing it, and gone the moment the branch is.</p>
+  <p>CodeLight makes commenting a layer of its own. Highlight anything, attach a note, and share it with your team through the repository you already share, without touching a single line of code.</p>
+  <p>And when a note should never reach the repository at all, it does not have to. Add <code>.vscode/codelight.json</code> to your <code>.gitignore</code> and every highlight and comment stays on your machine, private to you, while still sitting exactly where the code is. Nothing you jot down while reading has to become someone else's diff.</p>
+</section>
+
+<section>
+  <h2>What it does</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Highlight anything</h3>
+      <p>Mark any selection in a colour of your choice, with a palette you can redefine.</p>
+    </div>
+    <div class="card">
+      <h3>Talk about it</h3>
+      <p>Attach comments and replies, each attributed to a verified GitHub account.</p>
+    </div>
+    <div class="card">
+      <h3>Read the thread</h3>
+      <p>Hover a highlight for the whole discussion, with the latest note shown inline.</p>
+    </div>
+    <div class="card">
+      <h3>Find everything</h3>
+      <p>Browse every annotation from the activity bar, grouped by file and filtered by colour.</p>
+    </div>
+    <div class="card">
+      <h3>Share, or do not</h3>
+      <p>Commit one file to share annotations with the team, or gitignore it and keep them private.</p>
+    </div>
+    <div class="card">
+      <h3>Survive edits</h3>
+      <p>Highlights move with your changes and find their text again when it moves away.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>One file, in your repository</h2>
+  <p>Everything lives in <code>.vscode/codelight.json</code>, so annotations travel exactly like the code does.</p>
+<pre><code>{
+  "version": 1,
+  "annotations": [
+    {
+      "file": "src/app.ts",
+      "color": "yellow",
+      "author": { "login": "souhailaS", "id": "1234567" },
+      "comments": [
+        { "author": { "login": "octocat" }, "body": "Guard against b === 0" }
+      ]
+    }
+  ]
+}</code></pre>
+</section>
+
+<section>
+  <h2>Using it</h2>
+  <table>
+    <tr><th>Action</th><th>macOS</th><th>Windows and Linux</th></tr>
+    <tr><td>Highlight the selection</td><td><kbd>cmd</kbd> <kbd>alt</kbd> <kbd>K</kbd></td><td><kbd>ctrl</kbd> <kbd>K</kbd> then <kbd>ctrl</kbd> <kbd>H</kbd></td></tr>
+    <tr><td>Comment on the selection</td><td><kbd>cmd</kbd> <kbd>alt</kbd> <kbd>M</kbd></td><td><kbd>ctrl</kbd> <kbd>K</kbd> then <kbd>ctrl</kbd> <kbd>M</kbd></td></tr>
+  </table>
+  <p>Everything else lives in the command palette under <strong>CodeLight</strong>, in the editor right click menu, and in the panel behind the CodeLight icon in the activity bar.</p>
+</section>
+
+<section id="install">
+  <h2>Installing</h2>
+  <p>CodeLight is not on the marketplace yet. Build it and install the package locally.</p>
+<pre><code>git clone https://github.com/souhailaS/CodeLight.git
+cd CodeLight
+npm install
+npx @vscode/vsce package
+code --install-extension codelight-0.0.1.vsix</code></pre>
+</section>
+
+<footer>
+  MIT licensed. Built by <a href="https://github.com/souhailaS">souhailaS</a>.
+</footer>
+
+</div>
+</body>
+</html>
