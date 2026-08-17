@@ -47,6 +47,7 @@ function decodeStore(bytes: Uint8Array, target: vscode.Uri): string {
 }
 
 const TEMPORARY_NAME = /^codelight\.write-.+\.tmp$/;
+const TEMPORARY_AGE_MS = 10 * 60 * 1000;
 
 function temporaryName(): string {
   return `codelight.write-${newId()}.tmp`;
@@ -172,7 +173,11 @@ export class AnnotationStore implements vscode.Disposable {
       return false;
     }
     const source = chosen.target;
-    if (!(await exists(source))) {
+    const present = await this.probe(source);
+    if (present === undefined) {
+      return false;
+    }
+    if (!present) {
       void vscode.window.showInformationMessage("CodeLight has no annotation file to convert yet.");
       return false;
     }
@@ -203,7 +208,11 @@ export class AnnotationStore implements vscode.Disposable {
         void vscode.window.showWarningMessage(`CodeLight could not find ${source.fsPath} any more.`);
         return false;
       }
-      if (await exists(destination)) {
+      const taken = await this.probe(destination);
+      if (taken === undefined) {
+        return false;
+      }
+      if (taken) {
         void vscode.window.showWarningMessage(
           `CodeLight left ${source.fsPath} alone because ${destination.fsPath} already exists.`
         );
@@ -476,6 +485,15 @@ export class AnnotationStore implements vscode.Disposable {
     }
   }
 
+  private async probe(target: vscode.Uri): Promise<boolean | undefined> {
+    try {
+      return await exists(target);
+    } catch (error) {
+      this.reportFailure(`CodeLight could not check ${target.fsPath}. ${describe(error)}`);
+      return undefined;
+    }
+  }
+
   private async sweep(root: vscode.Uri): Promise<void> {
     const folder = vscode.Uri.joinPath(root, ".vscode");
     let entries: [string, vscode.FileType][];
@@ -484,11 +502,22 @@ export class AnnotationStore implements vscode.Disposable {
     } catch {
       return;
     }
+    const cutoff = Date.now() - TEMPORARY_AGE_MS;
     for (const [name, type] of entries) {
       if (type !== vscode.FileType.File || !TEMPORARY_NAME.test(name)) {
         continue;
       }
-      await this.cleanup(vscode.Uri.joinPath(folder, name));
+      const candidate = vscode.Uri.joinPath(folder, name);
+      let stat: vscode.FileStat;
+      try {
+        stat = await vscode.workspace.fs.stat(candidate);
+      } catch {
+        continue;
+      }
+      if (stat.mtime > cutoff) {
+        continue;
+      }
+      await this.cleanup(candidate);
     }
   }
 
