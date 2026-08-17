@@ -101,9 +101,7 @@ export class HighlightRenderer implements vscode.Disposable {
           range.end.character === 0 && range.end.line > range.start.line
             ? range.end.line - 1
             : range.end.line;
-        for (let line = range.start.line; line <= last; line += 1) {
-          gutter.push(new vscode.Range(line, 0, line, 0));
-        }
+        gutter.push(new vscode.Range(range.start.line, 0, last, 0));
       }
       const label = range.isEmpty ? undefined : inlineLabel(annotation, this.inline);
       if (label !== undefined) {

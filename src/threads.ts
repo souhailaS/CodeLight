@@ -90,9 +90,6 @@ export class ThreadView implements vscode.Disposable {
         if (shown) {
           return;
         }
-        if (this.pending.size > 0) {
-          void vscode.window.showInformationMessage("The note you are writing stays open.");
-        }
 
       })
     );
@@ -154,12 +151,12 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async reply(reply: vscode.CommentReply): Promise<void> {
-    this.visibility.show();
     const owned = this.owners.get(reply.thread);
     const body = reply.text.trim();
     if (body === "") {
       return;
     }
+    this.visibility.show();
     if (body.length > MAX_COMMENT_BODY) {
       const rescued = await rescue(body);
       void vscode.window.showWarningMessage(
@@ -465,7 +462,6 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async openDraft(editor: vscode.TextEditor): Promise<void> {
-    this.visibility.show();
     const root = this.store.rootUri;
     const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
     if (!relative) {
@@ -495,6 +491,7 @@ export class ThreadView implements vscode.Disposable {
         "CodeLight comments on one selection at a time. Using the first one."
       );
     }
+    this.visibility.show();
     for (const open of this.pending.keys()) {
       if (
         open.uri.toString() === editor.document.uri.toString() &&
@@ -526,7 +523,6 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async open(annotationId: string): Promise<void> {
-    this.visibility.show();
     const annotation = this.store.byId(annotationId);
     const root = this.store.rootUri;
     if (!annotation) {
@@ -542,6 +538,7 @@ export class ThreadView implements vscode.Disposable {
       );
       return;
     }
+    this.visibility.show();
     const uri = toUri(root, annotation.file);
     if (!uri) {
       return;
@@ -817,7 +814,7 @@ export class ThreadView implements vscode.Disposable {
   private sync(): void {
     const root = this.store.rootUri;
     const wanted = new Map<string, { annotation: Annotation; document: vscode.TextDocument }>();
-    if (root && this.visibility.visible) {
+    if (root) {
       for (const document of vscode.workspace.textDocuments) {
         const relative = toRelativePath(root, document.uri);
         if (!relative) {
@@ -859,13 +856,15 @@ export class ThreadView implements vscode.Disposable {
       }
     }
     for (const [id, entry] of wanted) {
-      const existing = this.threads.get(id);
+      const existing = this.threads.get(id) ?? this.attach(entry.document, entry.annotation);
       if (!existing) {
-        this.attach(entry.document, entry.annotation);
         continue;
       }
       existing.range = this.live.rangeFor(entry.document, entry.annotation);
       this.fill(existing, entry.annotation);
+      if (!this.visibility.visible) {
+        existing.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+      }
     }
   }
 

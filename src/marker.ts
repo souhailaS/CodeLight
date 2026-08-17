@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { HighlightRenderer } from "./decorations";
 import { IdentityProvider } from "./identity";
 import { HighlightCommands, pickColor } from "./highlights";
+import { timestamp } from "./ids";
 import { LiveRanges } from "./live";
 import { PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
@@ -13,6 +14,7 @@ const SETTLE_MS = 600;
 interface Marked {
   ids: string[];
   uri: string;
+  color: string;
 }
 
 export class MarkerMode implements vscode.Disposable {
@@ -93,6 +95,44 @@ export class MarkerMode implements vscode.Disposable {
     void vscode.commands.executeCommand("setContext", "codelight.marker", false);
   }
 
+  private async recolorExisting(
+    editor: vscode.TextEditor,
+    relative: string,
+    ranges: readonly vscode.Range[],
+    color: PaletteColor
+  ): Promise<boolean> {
+    const spans = this.live.spansFor(editor.document);
+    const matches: string[] = [];
+    for (const range of ranges) {
+      const hit = this.store.forFile(relative).find((annotation) => {
+        if (annotation.orphaned === true) {
+          return false;
+        }
+        return this.live.rangeFor(editor.document, annotation, spans).isEqual(range);
+      });
+      if (!hit) {
+        return false;
+      }
+      matches.push(hit.id);
+    }
+    const stale = matches.filter((id) => this.store.byId(id)?.color !== color.id);
+    if (stale.length > 0) {
+      await this.store.transaction((annotations) => {
+        let changed = false;
+        for (const id of stale) {
+          const current = annotations.get(id);
+          if (!current) {
+            continue;
+          }
+          annotations.set(id, { ...current, color: color.id, updatedAt: timestamp() });
+          changed = true;
+        }
+        return changed;
+      });
+    }
+    return true;
+  }
+
   private relativePath(editor: vscode.TextEditor): string | undefined {
     const root = this.store.rootUri;
     return root ? toRelativePath(root, editor.document.uri) : undefined;
@@ -148,8 +188,8 @@ export class MarkerMode implements vscode.Disposable {
     const previous = this.last;
     const relative = this.relativePath(editor);
     if (relative) {
-      const taken = this.highlights.markedRanges(editor, relative);
-      if (ranges.every((range) => taken.some((existing) => existing.isEqual(range)))) {
+      const recolored = await this.recolorExisting(editor, relative, ranges, color);
+      if (recolored) {
         this.catchUp(editor, ranges);
         return;
       }
@@ -160,7 +200,11 @@ export class MarkerMode implements vscode.Disposable {
       if (created.length > 0 && this.color && editor === vscode.window.activeTextEditor) {
         await this.dropPrevious(previous, editor, ranges);
         this.last = this.color
-          ? { ids: created.map((annotation) => annotation.id), uri: editor.document.uri.toString() }
+          ? {
+              ids: created.map((annotation) => annotation.id),
+              uri: editor.document.uri.toString(),
+              color: this.color.id
+            }
           : undefined;
       }
     } finally {
@@ -180,14 +224,18 @@ export class MarkerMode implements vscode.Disposable {
     const doomed: string[] = [];
     for (const id of previous.ids) {
       const annotation = this.store.byId(id);
-      if (!annotation || annotation.comments.length > 0) {
+      if (!annotation || annotation.comments.length > 0 || annotation.color !== previous.color) {
         continue;
       }
       const live = this.live.rangeFor(editor.document, annotation);
       if (live.isEmpty) {
         continue;
       }
-      if (ranges.some((range) => range.contains(live) && !range.isEqual(live))) {
+      const nested = ranges.some(
+        (range) =>
+          !range.isEqual(live) && (range.contains(live) || live.contains(range))
+      );
+      if (nested) {
         doomed.push(id);
       }
     }
