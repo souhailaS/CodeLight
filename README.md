@@ -1,4 +1,4 @@
-<img src="media/icon.png" width="88" align="right" alt="CodeLight" />
+<img src="https://raw.githubusercontent.com/souhailaS/CodeLight/main/media/icon.png" width="88" align="right" alt="CodeLight" />
 
 # CodeLight
 

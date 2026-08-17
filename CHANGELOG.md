@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+Fix the logo not loading on the Marketplace page.
+
 ## 0.1.0
 
 First release.
