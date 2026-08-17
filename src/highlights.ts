@@ -9,16 +9,7 @@ import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { toRelativePath } from "./paths";
 import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
-
-const SNIPPET_LENGTH = 50;
-
-function snippet(annotation: Annotation): string {
-  const text = annotation.anchor.text.replace(/\s+/g, " ").trim();
-  if (text.length <= SNIPPET_LENGTH) {
-    return text === "" ? "empty selection" : text;
-  }
-  return `${text.slice(0, SNIPPET_LENGTH)}…`;
-}
+import { snippet } from "./thread";
 
 function colorIcon(color: PaletteColor): vscode.ThemeIcon {
   const isDefault = DEFAULT_PALETTE.some(
