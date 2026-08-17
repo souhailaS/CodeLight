@@ -30,8 +30,108 @@
         "command": "codelight.signIn",
         "title": "Sign in with GitHub",
         "category": "CodeLight"
+      },
+      {
+        "command": "codelight.addHighlight",
+        "title": "Highlight Selection",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.removeHighlight",
+        "title": "Remove Highlight",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.changeColor",
+        "title": "Change Highlight Color",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.removeOrphaned",
+        "title": "Remove Orphaned Highlights",
+        "category": "CodeLight"
       }
-    ]
+    ],
+    "keybindings": [
+      {
+        "command": "codelight.addHighlight",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "codelight.addHighlight",
+          "group": "codelight@1",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "codelight.removeHighlight",
+          "group": "codelight@2",
+          "when": "editorTextFocus"
+        }
+      ]
+    },
+    "colors": [
+      {
+        "id": "codelight.yellow",
+        "description": "CodeLight yellow highlight",
+        "defaults": { "light": "#ffd54f", "dark": "#ffd54f", "highContrast": "#ffd54f" }
+      },
+      {
+        "id": "codelight.green",
+        "description": "CodeLight green highlight",
+        "defaults": { "light": "#81c784", "dark": "#81c784", "highContrast": "#81c784" }
+      },
+      {
+        "id": "codelight.blue",
+        "description": "CodeLight blue highlight",
+        "defaults": { "light": "#64b5f6", "dark": "#64b5f6", "highContrast": "#64b5f6" }
+      },
+      {
+        "id": "codelight.purple",
+        "description": "CodeLight purple highlight",
+        "defaults": { "light": "#ba68c8", "dark": "#ba68c8", "highContrast": "#ba68c8" }
+      },
+      {
+        "id": "codelight.pink",
+        "description": "CodeLight pink highlight",
+        "defaults": { "light": "#f06292", "dark": "#f06292", "highContrast": "#f06292" }
+      },
+      {
+        "id": "codelight.orange",
+        "description": "CodeLight orange highlight",
+        "defaults": { "light": "#ffb74d", "dark": "#ffb74d", "highContrast": "#ffb74d" }
+      }
+    ],
+    "configuration": {
+      "title": "CodeLight",
+      "properties": {
+        "codelight.palette": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Highlight colors offered in the picker. Leave empty to use the built in palette.",
+          "items": {
+            "type": "object",
+            "required": ["id", "hex"],
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "hex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+            }
+          }
+        },
+        "codelight.highlightOpacity": {
+          "type": "number",
+          "default": 0.3,
+          "minimum": 0.05,
+          "maximum": 1,
+          "description": "Opacity of the highlight background."
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "node esbuild.mjs",

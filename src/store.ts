@@ -72,7 +72,13 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   forFile(relativePath: string): Annotation[] {
-    return this.all.filter((annotation) => annotation.file === relativePath);
+    const matches: Annotation[] = [];
+    for (const annotation of this.annotations.values()) {
+      if (annotation.file === relativePath) {
+        matches.push(annotation);
+      }
+    }
+    return matches;
   }
 
   async add(annotation: Annotation): Promise<boolean> {
@@ -95,6 +101,10 @@ export class AnnotationStore implements vscode.Disposable {
 
   async remove(id: string): Promise<boolean> {
     return this.commit((annotations) => annotations.delete(id));
+  }
+
+  async transaction(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
+    return this.commit(apply);
   }
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
