@@ -88,9 +88,7 @@
     ],
     "menus": {
       "commandPalette": [
-        { "command": "codelight.reply", "when": "false" },
-        { "command": "codelight.editComment", "when": "false" },
-        { "command": "codelight.deleteComment", "when": "false" }
+        { "command": "codelight.reply", "when": "false" }
       ],
       "editor/context": [
         {
