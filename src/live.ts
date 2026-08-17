@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { buildAnchor } from "./anchors";
+import { buildAnchor, findAnchor } from "./anchors";
 import { Annotation, AnnotationRange } from "./model";
 import { toRelativePath } from "./paths";
 import { shiftSpan, Span } from "./ranges";
@@ -94,18 +94,26 @@ export class LiveRanges implements vscode.Disposable {
       if (!span || !placement || !seeded || !sameRange(seeded, annotation.range)) {
         continue;
       }
-      if (span.start === span.end) {
-        if (annotation.anchor.text !== "" && text.includes(annotation.anchor.text)) {
+      let live = span;
+      if (live.start === live.end) {
+        const recovered = findAnchor(text, annotation.anchor);
+        if (!recovered) {
+          orphaned.set(annotation.id, placement);
           continue;
         }
-        orphaned.set(annotation.id, placement);
-        continue;
+        live = recovered;
+        state.spans.set(annotation.id, live);
+        state.placements.set(annotation.id, {
+          start: document.positionAt(live.start),
+          end: document.positionAt(live.end)
+        });
       }
       const current = this.spanOf(document, annotation);
-      if (current.start === span.start && current.end === span.end) {
+      if (current.start === live.start && current.end === live.end) {
         continue;
       }
-      moved.set(annotation.id, { placement, anchorText: text.slice(span.start, span.end) });
+      const target = state.placements.get(annotation.id) ?? placement;
+      moved.set(annotation.id, { placement: target, anchorText: text.slice(live.start, live.end) });
     }
     if (moved.size === 0 && orphaned.size === 0) {
       this.holding.delete(key);
@@ -153,8 +161,26 @@ export class LiveRanges implements vscode.Disposable {
     const stillPresent = [...moved.keys(), ...orphaned.keys()].some(
       (id) => this.store.byId(id) !== undefined
     );
-    if (saved || !stillPresent) {
-      this.holding.delete(key);
+    if (!saved && stillPresent) {
+      return;
+    }
+    this.holding.delete(key);
+    if (!document.isDirty) {
+      this.documents.delete(key);
+      return;
+    }
+    for (const [id, entry] of moved) {
+      state.seeded.set(id, {
+        startLine: entry.placement.start.line,
+        startCharacter: entry.placement.start.character,
+        endLine: entry.placement.end.line,
+        endCharacter: entry.placement.end.character
+      });
+    }
+    for (const id of orphaned.keys()) {
+      state.spans.delete(id);
+      state.placements.delete(id);
+      state.seeded.delete(id);
     }
   }
 
@@ -245,6 +271,8 @@ export class LiveRanges implements vscode.Disposable {
     const key = event.document.uri.toString();
     if (!this.documents.has(key)) {
       this.spansFor(event.document);
+      this.changeEmitter.fire(event.document);
+      return;
     }
     const state = this.documents.get(key);
     if (!state || state.spans.size === 0) {

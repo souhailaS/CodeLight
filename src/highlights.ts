@@ -212,7 +212,7 @@ export class HighlightCommands {
     const picked = await vscode.window.showQuickPick(
       orphans.map((annotation) => ({
         label: snippet(annotation),
-        description: `line ${annotation.range.startLine + 1} by ${annotation.author.login}`,
+        description: `by ${annotation.author.login}`,
         picked: true,
         annotation
       })),
