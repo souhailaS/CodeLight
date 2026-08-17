@@ -10,7 +10,7 @@ Shared highlights and comments for VS Code, kept beside your code instead of ins
 
 **AI generated code tipped the balance.** Code now arrives written, with its comments already attached. The typing is increasingly done for us, so what is left is reading it and deciding whether it is right.
 
-**AI generated comments are not notes.** They document what the code does, which is a different job entirely. Nothing in them records what you noticed while reading, what looked wrong, or what you wanted a colleague to confirm.
+**Code comments are not notes.** They document what the code does, which is a different job entirely. Nothing in them records what you noticed while reading, what looked wrong, or what you wanted a colleague to confirm.
 
 **Keep them in a layer of their own.** Plenty of what you want to write down is not meant to ship. A doubt about a function, a reminder to check something later, a question for a colleague tomorrow. Put that in the source and it becomes part of the product and part of everyone's diff, and someone has to remember to take it out again.
 
