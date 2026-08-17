@@ -118,15 +118,7 @@ export class CommentCommands {
     }
   }
 
-  private async target(annotationId?: string): Promise<Annotation | typeof CREATE | undefined> {
-    if (annotationId !== undefined) {
-      const existing = this.store.byId(annotationId);
-      if (!existing) {
-        void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
-        return undefined;
-      }
-      return this.live(existing);
-    }
+  private async target(): Promise<Annotation | typeof CREATE | undefined> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to comment on.");

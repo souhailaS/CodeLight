@@ -94,12 +94,6 @@ export class HighlightCommands {
     if (!color) {
       return [];
     }
-    if (editor.document.version !== version) {
-      void vscode.window.showWarningMessage(
-        "The file changed while the color picker was open. Select the text again."
-      );
-      return [];
-    }
     let placed = ranges;
     let placedAnchors = anchors;
     if (editor.document.version !== version) {
