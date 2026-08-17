@@ -106,6 +106,8 @@ export class MarkerMode implements vscode.Disposable {
       event.kind !== vscode.TextEditorSelectionChangeKind.Mouse &&
       event.kind !== vscode.TextEditorSelectionChangeKind.Keyboard
     ) {
+      this.cancel();
+      this.last = undefined;
       return;
     }
     if (event.textEditor !== vscode.window.activeTextEditor) {

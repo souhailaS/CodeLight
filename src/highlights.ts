@@ -5,12 +5,21 @@ import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation } from "./model";
-import { PaletteColor } from "./palette";
+import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { Swatches } from "./swatches";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 import { snippet } from "./thread";
+
+function themeSwatch(color: PaletteColor): vscode.ThemeIcon {
+  const known = DEFAULT_PALETTE.some(
+    (entry) => entry.id === color.id && entry.hex.toLowerCase() === color.hex.toLowerCase()
+  );
+  return known
+    ? new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor(`codelight.${color.id}`))
+    : new vscode.ThemeIcon("circle-filled");
+}
 
 let swatches: Swatches | undefined;
 
@@ -26,9 +35,7 @@ export async function pickColor(
     palette.map(async (color) => ({
       label: color.label,
       description: color.hex,
-      iconPath:
-        (swatches ? await swatches.iconFor(color) : undefined) ??
-        new vscode.ThemeIcon("circle-filled"),
+      iconPath: (swatches ? await swatches.iconFor(color) : undefined) ?? themeSwatch(color),
       color
     }))
   );
@@ -53,7 +60,6 @@ export class HighlightCommands {
     only?: readonly vscode.Range[],
     target?: vscode.TextEditor
   ): Promise<Annotation[]> {
-    this.visibility.show();
     const editor = target ?? vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
@@ -71,7 +77,6 @@ export class HighlightCommands {
       return [];
     }
     const ranges: vscode.Range[] = [];
-    let skipped = 0;
     const sources = only ?? editor.selections;
     const taken = only === undefined ? [] : this.markedRanges(editor, relative);
     for (const selection of sources) {
@@ -82,7 +87,6 @@ export class HighlightCommands {
         continue;
       }
       if (taken.some((existing) => existing.isEqual(range))) {
-        skipped += 1;
         continue;
       }
       ranges.push(range);
@@ -90,9 +94,9 @@ export class HighlightCommands {
     if (ranges.length === 0) {
       if (only === undefined) {
         void vscode.window.showWarningMessage(
-          skipped > 0
-            ? "That text is already highlighted."
-            : "This line is empty. Select some text to highlight."
+          editor.selections.every((selection) => selection.isEmpty)
+            ? "This line is empty. Select some text to highlight."
+            : "Select some text to highlight."
         );
       }
       return [];
@@ -135,6 +139,9 @@ export class HighlightCommands {
       }
       placed = relocated;
       placedAnchors = rebuilt;
+    }
+    if (only === undefined) {
+      this.visibility.show();
     }
     const now = timestamp();
     const created = placed.map((range, index) => ({
@@ -398,7 +405,6 @@ export class HighlightCommands {
   }
 
   async recolor(): Promise<void> {
-    this.visibility.show();
     const annotation = await this.pickAtCursor("Change highlight color");
     if (!annotation) {
       return;
@@ -413,6 +419,7 @@ export class HighlightCommands {
     if (!color) {
       return;
     }
+    this.visibility.show();
     const saved = await this.store.update(annotation.id, (current) => ({
       ...current,
       color: color.id,

@@ -93,9 +93,12 @@ export class ThreadView implements vscode.Disposable {
         }
         if (this.pending.size > 0) {
           void vscode.window.showInformationMessage("The note you are writing stays open.");
-        } else if (closed > 0) {
+        }
+        if (closed > 0) {
           void vscode.window.showInformationMessage(
-            closed === 1 ? "One comment thread was closed." : `${closed} comment threads were closed.`
+            closed === 1
+              ? "One comment thread was closed. Anything typed into its reply box was not kept."
+              : `${closed} comment threads were closed. Anything typed into a reply box was not kept.`
           );
         }
       })
