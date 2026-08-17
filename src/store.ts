@@ -1,4 +1,5 @@
-import { gunzipSync, gzipSync } from "node:zlib";
+import { promisify } from "node:util";
+import { gunzip, gzip } from "node:zlib";
 import * as vscode from "vscode";
 import { newId } from "./ids";
 import { Annotation, parseStore, serializeStore } from "./model";
@@ -7,6 +8,9 @@ import { exists, isMissingFile, resolveRoot, STORE_PATTERN, storeUri } from "./p
 
 const RELOAD_DEBOUNCE_MS = 150;
 const MAX_STORE_BYTES = 64 * 1024 * 1024;
+
+const compress = promisify(gzip);
+const decompress = promisify(gunzip);
 
 type DiskState =
   | {
@@ -38,10 +42,10 @@ function isCompressed(target: vscode.Uri): boolean {
   return target.path.endsWith(".gz");
 }
 
-function decodeStore(bytes: Uint8Array, target: vscode.Uri): string {
+async function decodeStore(bytes: Uint8Array, target: vscode.Uri): Promise<string> {
   const buffer = Buffer.from(bytes);
   const text = isCompressed(target)
-    ? gunzipSync(buffer, { maxOutputLength: MAX_STORE_BYTES }).toString("utf8")
+    ? (await decompress(buffer, { maxOutputLength: MAX_STORE_BYTES })).toString("utf8")
     : buffer.toString("utf8");
   return text.replace(/^\uFEFF/, "");
 }
@@ -53,9 +57,17 @@ function temporaryName(): string {
   return `codelight.write-${newId()}.tmp`;
 }
 
-function encodeStore(content: string, target: vscode.Uri): Buffer {
+async function encodeStore(content: string, target: vscode.Uri): Promise<Buffer> {
   const buffer = Buffer.from(content, "utf8");
-  return isCompressed(target) ? gzipSync(buffer) : buffer;
+  if (!isCompressed(target)) {
+    return buffer;
+  }
+  if (buffer.length > MAX_STORE_BYTES) {
+    throw new Error(
+      `The store is larger than the ${MAX_STORE_BYTES / 1024 / 1024} MB limit for compressed storage. Convert it to the plain format with the command Convert Annotation Storage Format.`
+    );
+  }
+  return compress(buffer);
 }
 
 export class AnnotationStore implements vscode.Disposable {
@@ -288,8 +300,14 @@ export class AnnotationStore implements vscode.Disposable {
         message: `CodeLight could not check ${files.compressed.fsPath}. ${describe(error)}`
       };
     }
+    if (hasCompressed && hasPlain) {
+      if (this.active?.toString() === files.plain.toString()) {
+        return { status: "ok", target: files.plain, duplicate: true };
+      }
+      return { status: "ok", target: files.compressed, duplicate: true };
+    }
     if (hasCompressed) {
-      return { status: "ok", target: files.compressed, duplicate: hasPlain };
+      return { status: "ok", target: files.compressed, duplicate: false };
     }
     if (hasPlain) {
       return { status: "ok", target: files.plain, duplicate: false };
@@ -315,7 +333,7 @@ export class AnnotationStore implements vscode.Disposable {
         this.reportFailure(chosen.message);
         return false;
       }
-      this.warnAboutDuplicate(chosen.duplicate, files);
+      this.warnAboutDuplicate(chosen.duplicate, chosen.target, files);
       const target = chosen.target;
       const disk = await this.readDisk(target);
       if (generation !== this.generation) {
@@ -354,7 +372,7 @@ export class AnnotationStore implements vscode.Disposable {
     let raw: string;
     try {
       const bytes = await vscode.workspace.fs.readFile(target);
-      raw = decodeStore(bytes, target);
+      raw = await decodeStore(bytes, target);
     } catch (error) {
       if (isMissingFile(error)) {
         return { status: "missing" };
@@ -440,7 +458,7 @@ export class AnnotationStore implements vscode.Disposable {
         this.reportFailure(chosen.message);
         return;
       }
-      this.warnAboutDuplicate(chosen.duplicate, files);
+      this.warnAboutDuplicate(chosen.duplicate, chosen.target, files);
       const target = chosen.target;
       const disk = await this.readDisk(target);
       if (generation !== this.generation) {
@@ -473,11 +491,12 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   private async writeStore(target: vscode.Uri, content: string): Promise<void> {
+    const bytes = await encodeStore(content, target);
     const folder = vscode.Uri.joinPath(target, "..");
     const temporary = vscode.Uri.joinPath(folder, temporaryName());
     await vscode.workspace.fs.createDirectory(folder);
     try {
-      await vscode.workspace.fs.writeFile(temporary, encodeStore(content, target));
+      await vscode.workspace.fs.writeFile(temporary, bytes);
       await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
     } catch (error) {
       await this.cleanup(temporary);
@@ -550,7 +569,7 @@ export class AnnotationStore implements vscode.Disposable {
     void vscode.window.showErrorMessage(message);
   }
 
-  private warnAboutDuplicate(duplicate: boolean, files: StoreFiles): void {
+  private warnAboutDuplicate(duplicate: boolean, target: vscode.Uri, files: StoreFiles): void {
     if (!duplicate) {
       this.reportedDuplicate = false;
       return;
@@ -560,7 +579,7 @@ export class AnnotationStore implements vscode.Disposable {
     }
     this.reportedDuplicate = true;
     void vscode.window.showWarningMessage(
-      `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${files.compressed.fsPath} and leaving the other file alone.`
+      `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${target.fsPath} and leaving the other file alone.`
     );
   }
 
