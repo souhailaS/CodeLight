@@ -166,7 +166,14 @@ export class HighlightCommands {
       return true;
     });
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not save the highlight.");
+      if (seed) {
+        await vscode.env.clipboard.writeText(seed.body);
+      }
+      void vscode.window.showWarningMessage(
+        seed
+          ? "CodeLight could not save the highlight. Your comment was copied to the clipboard."
+          : "CodeLight could not save the highlight."
+      );
       return [];
     }
     return created;
@@ -288,10 +295,12 @@ export class HighlightCommands {
       return true;
     });
     if (missing) {
+      await this.store.refresh();
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
       return;
     }
     if (drifted) {
+      await this.store.refresh();
       void vscode.window.showWarningMessage(
         "A comment was added to that highlight just now. Run Remove Highlight again to confirm."
       );

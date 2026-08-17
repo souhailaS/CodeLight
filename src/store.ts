@@ -107,6 +107,10 @@ export class AnnotationStore implements vscode.Disposable {
     return this.commit(apply);
   }
 
+  async refresh(): Promise<void> {
+    await this.load();
+  }
+
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
     const run = this.queue.then(task, task);
     this.queue = run.then(

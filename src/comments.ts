@@ -71,6 +71,7 @@ export class CommentCommands {
       return;
     }
     if (!found) {
+      await this.store.refresh();
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
       return;
     }
@@ -242,7 +243,12 @@ export class CommentCommands {
   ): Promise<{ annotation: Annotation; comment: Comment } | undefined> {
     let annotation: Annotation | undefined;
     if (annotationId === undefined) {
-      annotation = await this.highlights.pickAtCursor(title);
+      const threaded = this.highlights.atCursor().filter((entry) => entry.comments.length > 0);
+      if (threaded.length === 0) {
+        void vscode.window.showInformationMessage("No commented highlight at the cursor.");
+        return undefined;
+      }
+      annotation = await this.highlights.pickAtCursor(title, threaded);
     } else {
       annotation = this.store.byId(annotationId);
       if (!annotation) {
@@ -274,6 +280,7 @@ export class CommentCommands {
     const body = await vscode.window.showInputBox({
       title,
       value,
+      ignoreFocusOut: true,
       prompt: "Shared with everyone who pulls this repository",
       validateInput: (input) => {
         if (input.trim() === "") {
