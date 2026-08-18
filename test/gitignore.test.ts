@@ -3,7 +3,16 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { messages, opened, queueAnswer, resetFake, Uri, warnings, workspace } from "./fakevscode";
+import {
+  messages,
+  opened,
+  queueAnswer,
+  resetFake,
+  TextDocument,
+  Uri,
+  warnings,
+  workspace
+} from "./fakevscode";
 import { keepPrivate, stopKeepingPrivate } from "../src/gitignore";
 
 let root = "";
@@ -99,7 +108,9 @@ describe("keeping the notes out of git", () => {
 
   it("refuses while the file has unsaved changes", async () => {
     fs.writeFileSync(ignorePath, "node_modules\n");
-    workspace.textDocuments = [{ uri: Uri.file(ignorePath), isDirty: true }];
+    const open = new TextDocument(Uri.file(ignorePath), "node_modules\n");
+    open.isDirty = true;
+    workspace.textDocuments = [open];
     await keepPrivate(Uri.file(root));
     assert.equal(text(), "node_modules\n");
     assert.ok(warnings().some((entry) => entry.includes("unsaved")));
