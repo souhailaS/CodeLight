@@ -28,6 +28,7 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 * Attach comments to a highlight and reply to your colleagues, each one attributed to a verified GitHub account.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
+* Give every folder of a multi root workspace its own annotation file, so notes follow the folder they belong to.
 * Keep everything in the CodeLight file in `.vscode`, so annotations travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.
 
 Two commands decide whether the notes travel. **Keep the Notes Out of Git** adds the annotation file to `.gitignore`, and **Let the Notes Go Into Git** takes it back out.
@@ -71,7 +72,7 @@ To build it from source instead, package the repository and install the result.
 ```
 npm install
 npx @vscode/vsce package
-code --install-extension codelight-0.4.0.vsix
+code --install-extension codelight-0.5.0.vsix
 ```
 
 ## License

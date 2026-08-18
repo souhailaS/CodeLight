@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+Notes you keep to yourself, and workspaces with more than one folder.
+
+* Every folder of the workspace gets its own annotation file now, rather than one folder winning and the rest going untracked. Annotations are read, written and deleted in the folder that holds the file they belong to, and a folder that leaves the workspace takes its notes with it.
+* Keep the Notes Out of Git adds the annotation file to `.gitignore` in one command, and Let the Notes Go Into Git takes it back out. Both read the file the way git does, keep the line endings it already uses, and refuse to write over unsaved changes.
+* The comment box no longer assumes the note is for somebody else. It says what is true instead, that a note travels with the annotation file if you commit it.
+* An annotation file larger than 64 MB is refused on the way in as well as on the way out, in both formats rather than only the compressed one.
+* A file whose version field is not a number is refused rather than read as if it had no version at all.
+* A change that turns out to alter nothing no longer throws away what it just read from disk, so a window that is behind catches up instead of staying stale.
+* A test suite, a hundred and thirty eight of them, run on every push.
+
 ## 0.4.0
 
 Interface work, so the extension looks and behaves like the demo.
