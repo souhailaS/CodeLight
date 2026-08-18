@@ -44,6 +44,12 @@ export class FileSystemError extends Error {
     error.code = "NoPermissions";
     return error;
   }
+
+  static Unavailable(message: string): FileSystemError {
+    const error = new FileSystemError(message);
+    error.code = "Unavailable";
+    return error;
+  }
 }
 
 export class EventEmitter<T> {
@@ -87,8 +93,23 @@ export const faults = {
   deletePath: undefined as string | undefined,
   statPath: undefined as string | undefined,
   statSkip: 0,
-  interruptWrite: false
+  interruptWrite: false,
+  errorShape: "vscode" as "vscode" | "node"
 };
+
+function raise(error: unknown, target: Uri): never {
+  if (faults.errorShape === "node") {
+    throw error;
+  }
+  const code = typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
+  if (code === "ENOENT") {
+    throw FileSystemError.FileNotFound(target);
+  }
+  if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
+    throw FileSystemError.NoPermissions(target);
+  }
+  throw FileSystemError.Unavailable(error instanceof Error ? error.message : String(error));
+}
 
 export function setConfiguration(key: string, value: unknown): void {
   configuration.set(key, value);
@@ -99,6 +120,7 @@ export function queueAnswer(answer: string): void {
 }
 
 export function clearFaults(): void {
+  faults.errorShape = "vscode";
   faults.corruptTemp = false;
   faults.deletePath = undefined;
   faults.statPath = undefined;
@@ -142,12 +164,36 @@ export const window = {
 
 export const opened: Array<{ uri: Uri }> = [];
 
+export interface Watcher {
+  pattern: unknown;
+  disposed: boolean;
+  created: EventEmitter<Uri>;
+  changed: EventEmitter<Uri>;
+  deleted: EventEmitter<Uri>;
+}
+
+export const watchers: Watcher[] = [];
+
+export function live(): Watcher[] {
+  return watchers.filter((watcher) => !watcher.disposed);
+}
+
+export function announce(kind: "created" | "changed" | "deleted", target: Uri): void {
+  for (const watcher of live()) {
+    watcher[kind].fire(target);
+  }
+}
+
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: Uri; name: string; index: number }>,
   textDocuments: [] as Array<{ uri: Uri; isDirty: boolean }>,
   fs: {
     async readFile(target: Uri): Promise<Uint8Array> {
-      return fs.promises.readFile(target.path);
+      try {
+        return await fs.promises.readFile(target.path);
+      } catch (error) {
+        raise(error, target);
+      }
     },
     async writeFile(target: Uri, bytes: Uint8Array): Promise<void> {
       if (faults.corruptTemp && /codelight\.write-.+\.tmp$/.test(target.path)) {
@@ -156,41 +202,61 @@ export const workspace = {
       }
       if (faults.interruptWrite) {
         await fs.promises.writeFile(target.path, Buffer.from(bytes).subarray(0, Math.floor(bytes.length / 2)));
-        throw Object.assign(new Error("EIO write interrupted"), { code: "EIO" });
+        raise(Object.assign(new Error("EIO write interrupted"), { code: "EIO" }), target);
       }
-      await fs.promises.writeFile(target.path, bytes);
+      try {
+        await fs.promises.writeFile(target.path, bytes);
+      } catch (error) {
+        raise(error, target);
+      }
     },
     async createDirectory(target: Uri): Promise<void> {
-      await fs.promises.mkdir(target.path, { recursive: true });
+      try {
+        await fs.promises.mkdir(target.path, { recursive: true });
+      } catch (error) {
+        raise(error, target);
+      }
     },
     async delete(target: Uri): Promise<void> {
       if (target.path === faults.deletePath) {
-        throw Object.assign(new Error("EPERM operation not permitted"), { code: "EPERM" });
+        raise(Object.assign(new Error("EPERM operation not permitted"), { code: "EPERM" }), target);
       }
-      await fs.promises.rm(target.path);
+      try {
+        await fs.promises.rm(target.path);
+      } catch (error) {
+        raise(error, target);
+      }
     },
     async stat(target: Uri): Promise<{ size: number; mtime: number; ctime: number; type: FileType }> {
       if (target.path === faults.statPath) {
         if (faults.statSkip > 0) {
           faults.statSkip -= 1;
         } else {
-          throw Object.assign(new Error("EIO stat failed"), { code: "EIO" });
+          raise(Object.assign(new Error("EIO stat failed"), { code: "EIO" }), target);
         }
       }
-      const info = await fs.promises.stat(target.path);
-      return {
-        size: info.size,
-        mtime: info.mtimeMs,
-        ctime: info.ctimeMs,
-        type: info.isDirectory() ? FileType.Directory : FileType.File
-      };
+      try {
+        const info = await fs.promises.stat(target.path);
+        return {
+          size: info.size,
+          mtime: info.mtimeMs,
+          ctime: info.ctimeMs,
+          type: info.isDirectory() ? FileType.Directory : FileType.File
+        };
+      } catch (error) {
+        raise(error, target);
+      }
     },
     async readDirectory(target: Uri): Promise<Array<[string, FileType]>> {
-      const found = await fs.promises.readdir(target.path, { withFileTypes: true });
-      return found.map((entry): [string, FileType] => [
-        entry.name,
-        entry.isDirectory() ? FileType.Directory : FileType.File
-      ]);
+      try {
+        const found = await fs.promises.readdir(target.path, { withFileTypes: true });
+        return found.map((entry): [string, FileType] => [
+          entry.name,
+          entry.isDirectory() ? FileType.Directory : FileType.File
+        ]);
+      } catch (error) {
+        raise(error, target);
+      }
     }
   },
   getConfiguration(section: string) {
@@ -203,12 +269,22 @@ export const workspace = {
   getWorkspaceFolder(target: Uri): { uri: Uri; name: string; index: number } | undefined {
     return workspace.workspaceFolders.find((folder) => target.path.startsWith(folder.uri.path));
   },
-  createFileSystemWatcher() {
+  createFileSystemWatcher(pattern?: unknown) {
+    const watcher: Watcher = {
+      pattern,
+      disposed: false,
+      created: new EventEmitter<Uri>(),
+      changed: new EventEmitter<Uri>(),
+      deleted: new EventEmitter<Uri>()
+    };
+    watchers.push(watcher);
     return {
-      onDidCreate: () => ({ dispose: () => undefined }),
-      onDidChange: () => ({ dispose: () => undefined }),
-      onDidDelete: () => ({ dispose: () => undefined }),
-      dispose: () => undefined
+      onDidCreate: watcher.created.event,
+      onDidChange: watcher.changed.event,
+      onDidDelete: watcher.deleted.event,
+      dispose: () => {
+        watcher.disposed = true;
+      }
     };
   },
   onDidChangeWorkspaceFolders() {
@@ -226,6 +302,7 @@ export function resetFake(): void {
   messages.length = 0;
   workspace.workspaceFolders = [];
   workspace.textDocuments = [];
+  watchers.length = 0;
   window.activeTextEditor = undefined;
   opened.length = 0;
 }
