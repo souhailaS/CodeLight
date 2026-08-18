@@ -10,7 +10,6 @@ import {
   resolveColor,
   toRgba
 } from "./palette";
-import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 import { InlineMode, inlineLabel, threadMarkdown } from "./thread";
@@ -68,10 +67,7 @@ export class HighlightRenderer implements vscode.Disposable {
   }
 
   render(editor: vscode.TextEditor): void {
-    const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
-    const annotations =
-      relative && this.visibility.visible ? this.store.forFile(relative) : [];
+    const annotations = this.visibility.visible ? this.store.forFile(editor.document.uri) : [];
     const spans = annotations.length > 0 ? this.live.spansFor(editor.document) : undefined;
     const grouped = new Map<string, vscode.DecorationOptions[]>();
     for (const key of this.types.keys()) {

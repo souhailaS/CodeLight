@@ -7,7 +7,6 @@ import { LiveRanges } from "./live";
 import { Anchor, Annotation } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { Swatches } from "./swatches";
-import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 import { snippet } from "./thread";
@@ -65,20 +64,19 @@ export class HighlightCommands {
       void vscode.window.showWarningMessage("Open a file to highlight.");
       return [];
     }
-    const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
-    if (!relative) {
-      const folder = root ? root.path.split("/").pop() : undefined;
+    const relative = this.store.relative(editor.document.uri);
+    const root = this.store.rootFor(editor.document.uri);
+    if (!relative || !root) {
       void vscode.window.showWarningMessage(
-        folder
-          ? `CodeLight is tracking the folder ${folder} and cannot annotate files outside it.`
+        this.store.isReady
+          ? "CodeLight can only annotate files inside a folder of this workspace."
           : "CodeLight needs an open folder."
       );
       return [];
     }
     const ranges: vscode.Range[] = [];
     const sources = only ?? editor.selections;
-    const taken = only === undefined ? [] : this.markedRanges(editor, relative);
+    const taken = only === undefined ? [] : this.markedRanges(editor);
     for (const selection of sources) {
       const range = selection.isEmpty
         ? editor.document.lineAt(selection.start.line).range
@@ -160,7 +158,10 @@ export class HighlightCommands {
       updatedAt: now,
       comments: []
     })) as Annotation[];
-    const saved = await this.store.transaction((annotations) => {
+    for (const annotation of created) {
+      annotation.root = root.toString();
+    }
+    const saved = await this.store.transaction(root, (annotations) => {
       for (const annotation of created) {
         annotations.set(annotation.id, annotation);
       }
@@ -175,17 +176,12 @@ export class HighlightCommands {
 
   atCursor(): Annotation[] {
     const editor = vscode.window.activeTextEditor;
-    const root = this.store.rootUri;
-    if (!editor || !root) {
-      return [];
-    }
-    const relative = toRelativePath(root, editor.document.uri);
-    if (!relative) {
+    if (!editor) {
       return [];
     }
     const position = editor.selection.active;
     const spans = this.live.spansFor(editor.document);
-    return this.store.forFile(relative).filter((annotation) => {
+    return this.store.forFile(editor.document.uri).filter((annotation) => {
       if (annotation.orphaned === true) {
         return annotation.range.startLine === position.line;
       }
@@ -194,10 +190,10 @@ export class HighlightCommands {
     });
   }
 
-  markedRanges(editor: vscode.TextEditor, relative: string): vscode.Range[] {
+  markedRanges(editor: vscode.TextEditor): vscode.Range[] {
     const spans = this.live.spansFor(editor.document);
     const taken: vscode.Range[] = [];
-    for (const annotation of this.store.forFile(relative)) {
+    for (const annotation of this.store.forFile(editor.document.uri)) {
       if (annotation.orphaned === true) {
         continue;
       }
@@ -208,8 +204,7 @@ export class HighlightCommands {
 
   isCollapsed(annotation: Annotation): boolean {
     const editor = vscode.window.activeTextEditor;
-    const root = this.store.rootUri;
-    const relative = editor && root ? toRelativePath(root, editor.document.uri) : undefined;
+    const relative = editor ? this.store.relative(editor.document.uri) : undefined;
     if (!editor || relative !== annotation.file) {
       return annotation.orphaned === true;
     }
@@ -232,16 +227,11 @@ export class HighlightCommands {
 
   enclosing(selection: vscode.Selection): Annotation[] {
     const editor = vscode.window.activeTextEditor;
-    const root = this.store.rootUri;
-    if (!editor || !root) {
-      return [];
-    }
-    const relative = toRelativePath(root, editor.document.uri);
-    if (!relative) {
+    if (!editor) {
       return [];
     }
     const spans = this.live.spansFor(editor.document);
-    return this.store.forFile(relative).filter((annotation) => {
+    return this.store.forFile(editor.document.uri).filter((annotation) => {
       if (annotation.orphaned === true) {
         return false;
       }
@@ -301,7 +291,7 @@ export class HighlightCommands {
     }
     let drifted = false;
     let missing = false;
-    const removed = await this.store.transaction((annotations) => {
+    const removed = await this.store.transaction(annotation.root, (annotations) => {
       const current = annotations.get(annotation.id);
       if (!current) {
         missing = true;
@@ -333,13 +323,14 @@ export class HighlightCommands {
 
   async removeOrphaned(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
-    const root = this.store.rootUri;
-    const relative = editor && root ? toRelativePath(root, editor.document.uri) : undefined;
-    if (!relative) {
+    const root = editor ? this.store.rootFor(editor.document.uri) : undefined;
+    if (!editor || !root) {
       void vscode.window.showWarningMessage("Open a tracked file to clean up its highlights.");
       return;
     }
-    const orphans = this.store.forFile(relative).filter((annotation) => annotation.orphaned === true);
+    const orphans = this.store
+      .forFile(editor.document.uri)
+      .filter((annotation) => annotation.orphaned === true);
     if (orphans.length === 0) {
       void vscode.window.showInformationMessage("No orphaned highlights in this file.");
       return;
@@ -375,7 +366,7 @@ export class HighlightCommands {
       picked.map((item) => [item.annotation.id, item.annotation.comments.length])
     );
     let drifted = false;
-    const saved = await this.store.transaction((annotations) => {
+    const saved = await this.store.transaction(root, (annotations) => {
       let changed = false;
       for (const [id, count] of expected) {
         const current = annotations.get(id);

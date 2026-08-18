@@ -6,7 +6,6 @@ import { LiveRanges } from "./live";
 import { Anchor, Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { readGutterMode, readPalette } from "./palette";
 import { rescue, withRescue } from "./rescue";
-import { toRelativePath, toUri } from "./paths";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 
@@ -79,7 +78,7 @@ export class ThreadView implements vscode.Disposable {
         const scoped = vscode.window.visibleTextEditors.some(
           (editor) => readGutterMode(editor.document.uri) === "highlights"
         );
-        if (scoped || readGutterMode(this.store.rootUri) === "highlights") {
+        if (scoped || readGutterMode(undefined) === "highlights") {
           this.controller.commentingRangeProvider = this.rangeProvider();
         }
       })
@@ -96,9 +95,7 @@ export class ThreadView implements vscode.Disposable {
   private rangeProvider(): vscode.CommentingRangeProvider {
     return {
       provideCommentingRanges: (document) => {
-        const root = this.store.rootUri;
-        const relative = root ? toRelativePath(root, document.uri) : undefined;
-        if (!relative || document.lineCount === 0) {
+        if (this.store.relative(document.uri) === undefined || document.lineCount === 0) {
           return [];
         }
         const mode = readGutterMode(document.uri);
@@ -110,7 +107,7 @@ export class ThreadView implements vscode.Disposable {
         }
         const spans = this.live.spansFor(document);
         const lines = new Set<number>();
-        for (const annotation of this.store.forFile(relative)) {
+        for (const annotation of this.store.forFile(document.uri)) {
           if (annotation.orphaned === true) {
             continue;
           }
@@ -216,7 +213,8 @@ export class ThreadView implements vscode.Disposable {
       let ran = false;
       let found = false;
       let lost = false;
-      const saved = await this.store.transaction((annotations) => {
+      const scope = this.store.byId(annotationId)?.root ?? reply.thread.uri;
+      const saved = await this.store.transaction(scope, (annotations) => {
         ran = true;
         const current = annotations.get(annotationId);
         if (!current) {
@@ -371,7 +369,8 @@ export class ThreadView implements vscode.Disposable {
     const now = timestamp();
     let ran = false;
     let found = false;
-    const saved = await this.store.transaction((annotations) => {
+    const scope = this.store.byId(comment.annotationId)?.root ?? thread.uri;
+    const saved = await this.store.transaction(scope, (annotations) => {
       ran = true;
       const current = annotations.get(comment.annotationId);
       if (!current || !current.comments.some((entry) => entry.id === comment.commentId)) {
@@ -409,6 +408,7 @@ export class ThreadView implements vscode.Disposable {
 
   async deleteComment(comment: ThreadComment): Promise<void> {
     const annotation = this.store.byId(comment.annotationId);
+    const thread = this.threads.get(comment.annotationId);
     if (!annotation) {
       return;
     }
@@ -423,7 +423,8 @@ export class ThreadView implements vscode.Disposable {
     }
     let ran = false;
     let found = false;
-    const saved = await this.store.transaction((annotations) => {
+    const scope = annotation.root ?? thread?.uri;
+    const saved = await this.store.transaction(scope, (annotations) => {
       ran = true;
       const current = annotations.get(comment.annotationId);
       if (!current || !current.comments.some((entry) => entry.id === comment.commentId)) {
@@ -453,11 +454,9 @@ export class ThreadView implements vscode.Disposable {
   }
 
   async openDraft(editor: vscode.TextEditor): Promise<void> {
-    const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
-    if (!relative) {
+    if (this.store.relative(editor.document.uri) === undefined) {
       void vscode.window.showWarningMessage(
-        "CodeLight only tracks files inside the workspace folder."
+        "CodeLight only tracks files inside a folder of this workspace."
       );
       return;
     }
@@ -515,12 +514,8 @@ export class ThreadView implements vscode.Disposable {
 
   async open(annotationId: string): Promise<void> {
     const annotation = this.store.byId(annotationId);
-    const root = this.store.rootUri;
     if (!annotation) {
       void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
-      return;
-    }
-    if (!root) {
       return;
     }
     if (annotation.orphaned === true) {
@@ -530,7 +525,7 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     this.visibility.show();
-    const uri = toUri(root, annotation.file);
+    const uri = this.store.uriFor(annotation);
     if (!uri) {
       return;
     }
@@ -634,7 +629,8 @@ export class ThreadView implements vscode.Disposable {
     let ran = false;
     let found = false;
     let drifted = false;
-    const saved = await this.store.transaction((annotations) => {
+    const scope = annotation.root ?? thread.uri;
+    const saved = await this.store.transaction(scope, (annotations) => {
       ran = true;
       const current = annotations.get(id);
       if (!current) {
@@ -674,12 +670,12 @@ export class ThreadView implements vscode.Disposable {
     comment: Comment | undefined,
     author: Comment["author"]
   ): Promise<string | undefined> {
-    const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, thread.uri) : undefined;
-    if (!relative) {
+    const relative = this.store.relative(thread.uri);
+    const root = this.store.rootFor(thread.uri);
+    if (relative === undefined || root === undefined) {
       const rescued = comment ? await rescue(comment.body) : false;
       void vscode.window.showWarningMessage(
-        withRescue("CodeLight only tracks files inside the workspace folder.", rescued)
+        withRescue("CodeLight only tracks files inside a folder of this workspace.", rescued)
       );
       return undefined;
     }
@@ -739,7 +735,8 @@ export class ThreadView implements vscode.Disposable {
       author,
       createdAt: now,
       updatedAt: now,
-      comments: comment ? [comment] : []
+      comments: comment ? [comment] : [],
+      root: root.toString()
     };
     if (!(await this.store.add(annotation))) {
       const rescued = comment ? await rescue(comment.body) : false;
@@ -803,15 +800,13 @@ export class ThreadView implements vscode.Disposable {
   }
 
   private sync(): void {
-    const root = this.store.rootUri;
     const wanted = new Map<string, { annotation: Annotation; document: vscode.TextDocument }>();
-    if (root && this.visibility.visible) {
+    if (this.visibility.visible) {
       for (const document of vscode.workspace.textDocuments) {
-        const relative = toRelativePath(root, document.uri);
-        if (!relative) {
+        if (this.store.relative(document.uri) === undefined) {
           continue;
         }
-        for (const annotation of this.store.forFile(relative)) {
+        for (const annotation of this.store.forFile(document.uri)) {
           if (annotation.orphaned === true) {
             continue;
           }
@@ -864,13 +859,11 @@ export class ThreadView implements vscode.Disposable {
   }
 
   private reposition(document: vscode.TextDocument): void {
-    const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, document.uri) : undefined;
-    if (!relative) {
+    if (this.store.relative(document.uri) === undefined) {
       return;
     }
     const spans = this.live.spansFor(document);
-    for (const annotation of this.store.forFile(relative)) {
+    for (const annotation of this.store.forFile(document.uri)) {
       const thread = this.threads.get(annotation.id);
       if (thread) {
         thread.range = this.live.rangeFor(document, annotation, spans);

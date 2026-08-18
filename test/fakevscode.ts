@@ -32,6 +32,18 @@ export class Uri {
 
 export class FileSystemError extends Error {
   code = "Unknown";
+
+  static FileNotFound(target?: Uri): FileSystemError {
+    const error = new FileSystemError(`file not found ${target?.fsPath ?? ""}`.trim());
+    error.code = "FileNotFound";
+    return error;
+  }
+
+  static NoPermissions(target?: Uri): FileSystemError {
+    const error = new FileSystemError(`no permissions ${target?.fsPath ?? ""}`.trim());
+    error.code = "NoPermissions";
+    return error;
+  }
 }
 
 export class EventEmitter<T> {
@@ -188,8 +200,8 @@ export const workspace = {
       }
     };
   },
-  getWorkspaceFolder(): undefined {
-    return undefined;
+  getWorkspaceFolder(target: Uri): { uri: Uri; name: string; index: number } | undefined {
+    return workspace.workspaceFolders.find((folder) => target.path.startsWith(folder.uri.path));
   },
   createFileSystemWatcher() {
     return {

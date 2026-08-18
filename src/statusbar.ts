@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 
@@ -24,14 +23,12 @@ export class FileStatus implements vscode.Disposable {
 
   private refresh(): void {
     const editor = vscode.window.activeTextEditor;
-    const root = this.store.rootUri;
-    const relative = editor && root ? toRelativePath(root, editor.document.uri) : undefined;
-    if (!relative) {
+    if (!editor) {
       this.item.hide();
       return;
     }
     const annotations = this.store
-      .forFile(relative)
+      .forFile(editor.document.uri)
       .filter((annotation) => annotation.orphaned !== true);
     if (annotations.length === 0) {
       this.item.hide();

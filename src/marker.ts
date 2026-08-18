@@ -5,7 +5,6 @@ import { HighlightCommands, pickColor } from "./highlights";
 import { timestamp } from "./ids";
 import { LiveRanges } from "./live";
 import { PaletteColor } from "./palette";
-import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 
@@ -63,10 +62,9 @@ export class MarkerMode implements vscode.Disposable {
       return;
     }
     const editor = vscode.window.activeTextEditor;
-    const root = this.store.rootUri;
-    if (!editor || !root || !toRelativePath(root, editor.document.uri)) {
+    if (!editor || this.store.relative(editor.document.uri) === undefined) {
       void vscode.window.showWarningMessage(
-        "Open a file inside the workspace folder to use the marker."
+        "Open a file inside a folder of this workspace to use the marker."
       );
       return;
     }
@@ -97,7 +95,6 @@ export class MarkerMode implements vscode.Disposable {
 
   private async recolorExisting(
     editor: vscode.TextEditor,
-    relative: string,
     ranges: readonly vscode.Range[],
     color: PaletteColor
   ): Promise<boolean> {
@@ -105,7 +102,7 @@ export class MarkerMode implements vscode.Disposable {
     const matches: string[] = [];
     for (const range of ranges) {
       const me = this.identity.identity?.id;
-      const hit = this.store.forFile(relative).find((annotation) => {
+      const hit = this.store.forFile(editor.document.uri).find((annotation) => {
         if (annotation.orphaned === true || annotation.comments.length > 0) {
           return false;
         }
@@ -121,7 +118,7 @@ export class MarkerMode implements vscode.Disposable {
     }
     const stale = matches.filter((id) => this.store.byId(id)?.color !== color.id);
     if (stale.length > 0) {
-      const saved = await this.store.transaction((annotations) => {
+      const saved = await this.store.transaction(editor.document.uri, (annotations) => {
         let changed = false;
         for (const id of stale) {
           const current = annotations.get(id);
@@ -139,11 +136,6 @@ export class MarkerMode implements vscode.Disposable {
     }
     this.last = undefined;
     return true;
-  }
-
-  private relativePath(editor: vscode.TextEditor): string | undefined {
-    const root = this.store.rootUri;
-    return root ? toRelativePath(root, editor.document.uri) : undefined;
   }
 
   private cancel(): void {
@@ -172,8 +164,7 @@ export class MarkerMode implements vscode.Disposable {
       this.cancel();
       return;
     }
-    const root = this.store.rootUri;
-    if (!root || !toRelativePath(root, event.textEditor.document.uri)) {
+    if (this.store.relative(event.textEditor.document.uri) === undefined) {
       return;
     }
     this.cancel();
@@ -195,9 +186,8 @@ export class MarkerMode implements vscode.Disposable {
       return;
     }
     const previous = this.last;
-    const relative = this.relativePath(editor);
-    if (relative) {
-      const recolored = await this.recolorExisting(editor, relative, ranges, color);
+    if (this.store.relative(editor.document.uri) !== undefined) {
+      const recolored = await this.recolorExisting(editor, ranges, color);
       if (recolored) {
         this.catchUp(editor, ranges);
         return;
@@ -250,7 +240,7 @@ export class MarkerMode implements vscode.Disposable {
     if (doomed.length === 0) {
       return;
     }
-    const saved = await this.store.transaction((annotations) => {
+    const saved = await this.store.transaction(editor.document.uri, (annotations) => {
       let changed = false;
       for (const id of doomed) {
         const current = annotations.get(id);

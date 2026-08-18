@@ -2,13 +2,13 @@ import * as vscode from "vscode";
 import { LiveRanges } from "./live";
 import { Annotation, Comment } from "./model";
 import { DEFAULT_PALETTE, PaletteColor, readPalette } from "./palette";
-import { toUri } from "./paths";
 import { AnnotationStore } from "./store";
 import { snippet } from "./thread";
 
 export interface FileNode {
   kind: "file";
   file: string;
+  root: string | undefined;
   annotations: Annotation[];
 }
 
@@ -104,12 +104,11 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
         basename(node.file),
         vscode.TreeItemCollapsibleState.Expanded
       );
-      const root = this.store.rootUri;
-      item.resourceUri = root ? toUri(root, node.file) : undefined;
-      item.description = directory(node.file);
+      item.resourceUri = this.store.uriFor(node.annotations[0]);
+      item.description = this.store.label(node.root, directory(node.file));
       item.contextValue = "codelight.file";
       item.iconPath = vscode.ThemeIcon.File;
-      item.id = `file:${node.file}`;
+      item.id = `file:${node.root ?? ""}:${node.file}`;
       return item;
     }
     if (node.kind === "annotation") {
@@ -132,7 +131,7 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       item.iconPath =
         annotation.orphaned === true
           ? new vscode.ThemeIcon("circle-slash")
-          : colorIcon(annotation.color, readPalette(this.store.rootUri));
+          : colorIcon(annotation.color, readPalette(this.store.uriFor(annotation)));
       item.id = `annotation:${annotation.id}`;
       item.tooltip = annotation.anchor.text;
       item.command = {
@@ -156,21 +155,26 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
   }
 
   private files(): FileNode[] {
-    const grouped = new Map<string, Annotation[]>();
+    const grouped = new Map<string, FileNode>();
     for (const annotation of this.store.all) {
       if (this.filter !== undefined && annotation.color !== this.filter) {
         continue;
       }
-      const list = grouped.get(annotation.file) ?? [];
-      list.push(annotation);
-      grouped.set(annotation.file, list);
+      const key = `${annotation.root ?? ""}\u0000${annotation.file}`;
+      const node = grouped.get(key) ?? {
+        kind: "file" as const,
+        file: annotation.file,
+        root: annotation.root,
+        annotations: []
+      };
+      node.annotations.push(annotation);
+      grouped.set(key, node);
     }
     return [...grouped.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([file, annotations]) => ({
-        kind: "file" as const,
-        file,
-        annotations: annotations.sort((a, b) => a.range.startLine - b.range.startLine)
+      .map(([, node]) => ({
+        ...node,
+        annotations: node.annotations.sort((a, b) => a.range.startLine - b.range.startLine)
       }));
   }
 
@@ -208,12 +212,8 @@ export class PanelCommands {
 
   async reveal(annotationId: string): Promise<void> {
     const annotation = this.store.byId(annotationId);
-    const root = this.store.rootUri;
-    if (!annotation || !root) {
-      return;
-    }
-    const uri = toUri(root, annotation.file);
-    if (!uri) {
+    const uri = annotation ? this.store.uriFor(annotation) : undefined;
+    if (!annotation || !uri) {
       return;
     }
     let document: vscode.TextDocument;
@@ -260,24 +260,60 @@ export class PanelCommands {
     let drifted = false;
     let missing = false;
     let removed = false;
-    const saved = await this.store.transaction((annotations) => {
-      let changed = false;
-      for (const [id, count] of expected) {
-        const current = annotations.get(id);
-        if (!current) {
-          missing = true;
-          continue;
-        }
-        if (current.comments.length !== count) {
-          drifted = true;
-          return false;
-        }
-        annotations.delete(id);
-        changed = true;
-        removed = true;
+    const grouped = new Map<string, Map<string, number>>();
+    for (const [id, count] of expected) {
+      const holders = this.store.holdersOf(id);
+      if (holders.length === 0) {
+        missing = true;
+        continue;
       }
-      return changed;
-    });
+      for (const holder of holders) {
+        if (holder.byId(id)?.comments.length !== count) {
+          drifted = true;
+          break;
+        }
+        const bucket = grouped.get(holder.key) ?? new Map<string, number>();
+        bucket.set(id, count);
+        grouped.set(holder.key, bucket);
+      }
+      if (drifted) {
+        break;
+      }
+    }
+    if (drifted) {
+      await this.store.refresh();
+      void vscode.window.showWarningMessage(
+        `Those comments just changed. Run ${retry} again to confirm.`
+      );
+      return;
+    }
+    let saved = grouped.size > 0;
+    for (const [root, bucket] of grouped) {
+      const done = await this.store.transaction(root, (annotations) => {
+        let changed = false;
+        for (const [id, count] of bucket) {
+          const current = annotations.get(id);
+          if (!current) {
+            missing = true;
+            continue;
+          }
+          if (current.comments.length !== count) {
+            drifted = true;
+            return false;
+          }
+          annotations.delete(id);
+          changed = true;
+          removed = true;
+        }
+        return changed;
+      });
+      if (!done) {
+        saved = false;
+      }
+      if (drifted) {
+        break;
+      }
+    }
     if (drifted) {
       await this.store.refresh();
       void vscode.window.showWarningMessage(
@@ -342,7 +378,8 @@ export class PanelCommands {
   }
 
   async filterByColor(): Promise<void> {
-    const palette = readPalette(this.store.rootUri);
+    const active = vscode.window.activeTextEditor;
+    const palette = readPalette(active ? this.store.rootFor(active.document.uri) : undefined);
     const used = new Set(this.store.all.map((annotation) => annotation.color));
     const colors: PaletteColor[] = palette.filter((color) => used.has(color.id));
     for (const color of used) {
