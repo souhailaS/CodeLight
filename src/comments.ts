@@ -208,7 +208,7 @@ export class CommentCommands {
       title,
       value,
       ignoreFocusOut: true,
-      prompt: "Shared with everyone who pulls this repository",
+      prompt: "It travels with the annotation file if you commit it",
       validateInput: (input) => {
         if (input.trim() === "") {
           return "A comment cannot be empty.";

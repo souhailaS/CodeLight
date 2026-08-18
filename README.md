@@ -30,6 +30,8 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
 * Keep everything in the CodeLight file in `.vscode`, so annotations travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.
 
+Two commands decide whether the notes travel. **Keep the Notes Out of Git** adds the annotation file to `.gitignore`, and **Let the Notes Go Into Git** takes it back out.
+
 Highlights follow your edits. Insert lines above one and it moves with the text. Delete the text it marks and CodeLight looks for it elsewhere in the file before giving up, and if the text comes back the highlight returns with it.
 
 ## Using it

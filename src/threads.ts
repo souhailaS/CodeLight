@@ -62,8 +62,8 @@ export class ThreadView implements vscode.Disposable {
   ) {
     this.controller = vscode.comments.createCommentController("codelight", "CodeLight");
     this.controller.options = {
-      prompt: "Comment on this code. Shared with everyone who pulls this repository.",
-      placeHolder: "Leave a note for your team"
+      prompt: "A note beside the code. It travels with the annotation file if you commit it.",
+      placeHolder: "Write a note"
     };
     this.controller.commentingRangeProvider = this.rangeProvider();
     this.disposables.push(

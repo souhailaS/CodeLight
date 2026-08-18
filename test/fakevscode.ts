@@ -133,11 +133,18 @@ export const window = {
       return Promise.resolve(undefined);
     }
     return Promise.resolve(answers.shift());
+  },
+  showTextDocument(document: unknown) {
+    opened.push(document as { uri: Uri });
+    return Promise.resolve(undefined);
   }
 };
 
+export const opened: Array<{ uri: Uri }> = [];
+
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: Uri; name: string; index: number }>,
+  textDocuments: [] as Array<{ uri: Uri; isDirty: boolean }>,
   fs: {
     async readFile(target: Uri): Promise<Uint8Array> {
       return fs.promises.readFile(target.path);
@@ -206,6 +213,9 @@ export const workspace = {
   },
   onDidChangeWorkspaceFolders() {
     return { dispose: () => undefined };
+  },
+  openTextDocument(target: Uri) {
+    return Promise.resolve({ uri: target });
   }
 };
 
@@ -215,5 +225,7 @@ export function resetFake(): void {
   answers.length = 0;
   messages.length = 0;
   workspace.workspaceFolders = [];
+  workspace.textDocuments = [];
   window.activeTextEditor = undefined;
+  opened.length = 0;
 }
