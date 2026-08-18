@@ -461,6 +461,13 @@ export function errors(): string[] {
   return messages.filter((entry) => entry.startsWith("error "));
 }
 
+export const editorSelectionChanged = new EventEmitter<{
+  textEditor: unknown;
+  selections: unknown[];
+  kind: number | undefined;
+}>();
+export const activeEditorChanged = new EventEmitter<unknown>();
+
 export const window = {
   activeTextEditor: undefined as unknown,
   showErrorMessage(message: string) {
@@ -489,6 +496,39 @@ export const window = {
   onDidChangeVisibleTextEditors() {
     return { dispose: () => undefined };
   },
+  createStatusBarItem(alignment?: StatusBarAlignment, priority?: number) {
+    void alignment;
+    void priority;
+    const item: StatusBar = {
+      text: "",
+      tooltip: "",
+      command: undefined,
+      visible: false,
+      disposed: false,
+      show(): void {
+        item.visible = true;
+      },
+      hide(): void {
+        item.visible = false;
+      },
+      dispose(): void {
+        item.disposed = true;
+      }
+    };
+    statusBars.push(item);
+    return item;
+  },
+  setStatusBarMessage(message: string) {
+    messages.push(`status ${message}`);
+    return { dispose: () => undefined };
+  },
+  showQuickPick(items: unknown[], options?: unknown) {
+    picks.push({ items, options });
+    const at = chosen.shift();
+    return Promise.resolve(at === undefined ? undefined : (items as unknown[])[at]);
+  },
+  onDidChangeTextEditorSelection: editorSelectionChanged.event,
+  onDidChangeActiveTextEditor: activeEditorChanged.event,
   createTextEditorDecorationType(options: unknown) {
     const type: Decoration = {
       options,
@@ -573,6 +613,51 @@ export function announce(kind: "created" | "changed" | "deleted", target: Uri): 
     watcher[kind].fire(target);
   }
 }
+
+export enum StatusBarAlignment {
+  Left = 1,
+  Right = 2
+}
+
+export interface StatusBar {
+  text: string;
+  tooltip: string;
+  command: string | undefined;
+  visible: boolean;
+  disposed: boolean;
+  show(): void;
+  hide(): void;
+  dispose(): void;
+}
+
+export const statusBars: StatusBar[] = [];
+
+export const picks: Array<{ items: unknown[]; options: unknown }> = [];
+
+const chosen: Array<number | undefined> = [];
+
+export function queuePick(index: number | undefined): void {
+  chosen.push(index);
+}
+
+export enum TextEditorSelectionChangeKind {
+  Keyboard = 1,
+  Mouse = 2,
+  Command = 3
+}
+
+export const authentication = {
+  session: undefined as { account: { label: string; id: string }; accessToken: string } | undefined,
+  getSession(_provider: string, _scopes: string[], options?: { createIfNone?: boolean }) {
+    if (!authentication.session && options?.createIfNone !== true) {
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(authentication.session);
+  },
+  onDidChangeSessions() {
+    return { dispose: () => undefined };
+  }
+};
 
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: Uri; name: string; index: number }>,
@@ -735,4 +820,10 @@ export function resetFake(): void {
   opened.length = 0;
   decorations.length = 0;
   invoked.length = 0;
+  statusBars.length = 0;
+  picks.length = 0;
+  chosen.length = 0;
+  authentication.session = undefined;
+  editorSelectionChanged.dispose();
+  activeEditorChanged.dispose();
 }
