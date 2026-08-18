@@ -325,11 +325,11 @@ export class PanelCommands {
       await this.store.refresh();
     }
     if (!saved && !removed && missing) {
-      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      void vscode.window.showWarningMessage("That highlight is no longer in the annotation file.");
       return;
     }
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      void vscode.window.showWarningMessage("CodeLight could not update the annotation file.");
     }
   }
 

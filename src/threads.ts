@@ -238,12 +238,12 @@ export class ThreadView implements vscode.Disposable {
       if (!saved) {
         const rescued = await rescue(body);
         const reason = !ran
-          ? "CodeLight could not update the shared file."
+          ? "CodeLight could not update the annotation file."
           : lost
             ? "That highlight lost its text, so the comment was not saved."
             : found
               ? "CodeLight could not save the comment."
-              : "That highlight is no longer in the shared file.";
+              : "That highlight is no longer in the annotation file.";
         if (ran && !found) {
           await this.store.refresh();
         }
@@ -392,10 +392,10 @@ export class ThreadView implements vscode.Disposable {
     if (!saved) {
       const rescued = await rescue(body);
       const reason = !ran
-        ? "CodeLight could not update the shared file."
+        ? "CodeLight could not update the annotation file."
         : found
           ? "CodeLight could not save the comment."
-          : "That comment is no longer in the shared file.";
+          : "That comment is no longer in the annotation file.";
       if (ran && !found) {
         await this.store.refresh();
       }
@@ -413,7 +413,7 @@ export class ThreadView implements vscode.Disposable {
     const annotation = this.store.byId(comment.annotationId);
     const thread = this.threads.get(comment.annotationId);
     if (!annotation) {
-      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      void vscode.window.showWarningMessage("That highlight is no longer in the annotation file.");
       await this.store.refresh();
       return;
     }
@@ -446,10 +446,10 @@ export class ThreadView implements vscode.Disposable {
     if (!saved) {
       void vscode.window.showWarningMessage(
         !ran
-          ? "CodeLight could not update the shared file."
+          ? "CodeLight could not update the annotation file."
           : found
             ? "CodeLight could not delete the comment."
-            : "That comment is no longer in the shared file."
+            : "That comment is no longer in the annotation file."
       );
       if (ran && !found) {
         await this.store.refresh();
@@ -520,7 +520,7 @@ export class ThreadView implements vscode.Disposable {
   async open(annotationId: string): Promise<void> {
     const annotation = this.store.byId(annotationId);
     if (!annotation) {
-      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      void vscode.window.showWarningMessage("That highlight is no longer in the annotation file.");
       return;
     }
     if (annotation.orphaned === true) {
@@ -594,17 +594,11 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const rescued = await rescue(typed);
-    if (!rescued) {
-      return;
-    }
-    if (created === undefined) {
-      void vscode.window.showInformationMessage(
-        "The highlight was not saved. Your text was copied to the clipboard."
-      );
-      return;
-    }
+    const kept = rescued ? " Your text was copied to the clipboard." : "";
     void vscode.window.showInformationMessage(
-      "Saved the highlight without the comment. Your text was copied to the clipboard."
+      created === undefined
+        ? `The highlight was not saved.${kept}`
+        : `Saved the highlight without the comment.${kept}`
     );
   }
 
@@ -662,8 +656,8 @@ export class ThreadView implements vscode.Disposable {
       }
       void vscode.window.showWarningMessage(
         ran && !found
-          ? "That highlight is no longer in the shared file."
-          : "CodeLight could not update the shared file."
+          ? "That highlight is no longer in the annotation file."
+          : "CodeLight could not update the annotation file."
       );
       return;
     }
