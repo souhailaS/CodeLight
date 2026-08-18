@@ -8,12 +8,14 @@ import {
   editorFor,
   Editor,
   editorSelectionChanged,
+  faults,
   invoked,
   messages,
   Position,
   queuePick,
   Range,
   resetFake,
+  setFolderConfiguration,
   statusBars,
   TextDocument,
   TextEditorSelectionChangeKind,
@@ -304,6 +306,120 @@ describe("marking while it is on", () => {
     (window as unknown as { activeTextEditor: unknown }).activeTextEditor = undefined;
     await settle(() => store.all.length > 0, 80);
     assert.deepEqual(store.all, []);
+  });
+});
+
+describe("what the marker does under pressure", () => {
+  it("keeps a highlight the user finished with when the save was slow", async () => {
+    const { store, marker, editor, document } = await rig();
+    await turnOn(marker);
+    faults.writeDelayMs = 900;
+    drive(editor, [select(document, 6, 11)]);
+    await new Promise((done) => setTimeout(done, 700));
+    drive(editor, [select(document, 6, 6)]);
+    await settle(() => store.all.length === 1, 400);
+    faults.writeDelayMs = 0;
+    drive(editor, [select(document, 6, 17)]);
+    await quiet(store);
+    assert.equal(store.all.length, 2);
+    assert.deepEqual(
+      store.all.map((entry) => entry.anchor.text).sort(),
+      ["total", "total = one"]
+    );
+  });
+
+  it("keeps the chain after it recoloured one of its own", async () => {
+    const { store, marker, editor, document } = await rig();
+    await turnOn(marker);
+    drive(editor, [select(document, 6, 11)]);
+    await settle(() => store.all.length === 1);
+    drive(editor, [select(document, 6, 11)]);
+    await quiet(store);
+    drive(editor, [select(document, 6, 17)]);
+    await quiet(store);
+    assert.equal(store.all.length, 1);
+    assert.equal(store.all[0].anchor.text, "total = one");
+  });
+
+  it("recolours a highlight the outer folder owns", async () => {
+    const inner = nodePath.join(root, "packages", "inner");
+    fs.mkdirSync(nodePath.join(inner, ".vscode"), { recursive: true });
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "root", index: 0 },
+      { uri: Uri.file(inner), name: "inner", index: 1 }
+    ];
+    const { store, marker } = await rig();
+    const nested = new TextDocument(Uri.file(nodePath.join(inner, "src/a.ts")), SOURCE);
+    workspace.textDocuments = [nested];
+    const there = editorFor(nested);
+    (there as unknown as { selections: Range[] }).selections = [];
+    window.activeTextEditor = there;
+    window.visibleTextEditors = [there];
+    assert.ok(
+      await store.add({
+        id: "outer",
+        file: "packages/inner/src/a.ts",
+        range: { startLine: 0, startCharacter: 6, endLine: 0, endCharacter: 11 },
+        anchor: { text: "total", before: "const ", after: " = one" },
+        color: "green",
+        author: { login: "ada", id: "42" },
+        createdAt: "t",
+        updatedAt: "t",
+        comments: [],
+        root: Uri.file(root).toString()
+      })
+    );
+    await turnOn(marker);
+    messages.length = 0;
+    drive(there, [select(nested, 6, 11)]);
+    await quiet(store);
+    assert.equal(store.all.length, 1);
+    assert.equal(store.byId("outer")?.color, "yellow");
+    assert.deepEqual(warnings(), []);
+  });
+
+  it("stops when the folder it moved to has no such colour", async () => {
+    const second = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-other-"));
+    fs.mkdirSync(nodePath.join(second, ".vscode"));
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "root", index: 0 },
+      { uri: Uri.file(second), name: "second", index: 1 }
+    ];
+    setFolderConfiguration(Uri.file(second), "codelight.palette", [
+      { id: "rust", label: "Rust", hex: "#b7410e" }
+    ]);
+    const { store, marker } = await rig();
+    await turnOn(marker);
+    const other = new TextDocument(Uri.file(nodePath.join(second, "src/b.ts")), SOURCE);
+    workspace.textDocuments = [other];
+    const there = editorFor(other);
+    (there as unknown as { selections: Range[] }).selections = [];
+    window.activeTextEditor = there;
+    messages.length = 0;
+    drive(there, [select(other, 6, 11)]);
+    await quiet(store);
+    assert.deepEqual(store.all, []);
+    assert.equal(marker.active, false);
+    assert.ok(warnings().some((entry) => entry.includes("palette of this folder")));
+    fs.rmSync(second, { recursive: true, force: true });
+  });
+
+  it("says nothing when a selection lands on text it cannot mark", async () => {
+    const { store, marker, editor, document } = await rig();
+    await turnOn(marker);
+    drive(editor, [select(document, 6, 11)]);
+    await settle(() => store.all.length === 1);
+    assert.ok(
+      await store.update(store.all[0].id, (current) => ({
+        ...current,
+        author: { login: "someone", id: "99" }
+      }))
+    );
+    messages.length = 0;
+    drive(editor, [select(document, 6, 11)]);
+    await quiet(store);
+    assert.equal(store.all.length, 1);
+    assert.deepEqual(warnings(), []);
   });
 });
 
