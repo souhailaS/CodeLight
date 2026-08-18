@@ -105,6 +105,34 @@ describe("keeping the notes out of git", () => {
     assert.ok(warnings().some((entry) => entry.includes("unsaved")));
   });
 
+  it("replaces the file through a temporary one", async () => {
+    fs.writeFileSync(ignorePath, "node_modules\n");
+    const before = fs.statSync(ignorePath).ino;
+    await keepPrivate(Uri.file(root));
+    assert.notEqual(fs.statSync(ignorePath).ino, before);
+    assert.deepEqual(
+      fs.readdirSync(root).filter((name) => name.includes("tmp")),
+      []
+    );
+  });
+
+  it("keeps the permissions of the file it replaces", async () => {
+    fs.writeFileSync(ignorePath, "node_modules\n");
+    fs.chmodSync(ignorePath, 0o640);
+    await keepPrivate(Uri.file(root));
+    assert.equal(fs.statSync(ignorePath).mode & 0o777, 0o640);
+  });
+
+  it("writes a hard linked file in place", async () => {
+    fs.writeFileSync(ignorePath, "node_modules\n");
+    const twin = nodePath.join(root, "twin");
+    fs.linkSync(ignorePath, twin);
+    const before = fs.statSync(ignorePath).ino;
+    await keepPrivate(Uri.file(root));
+    assert.equal(fs.statSync(ignorePath).ino, before);
+    assert.ok(fs.readFileSync(twin, "utf8").includes("codelight.json"));
+  });
+
   it("opens the file when asked", async () => {
     queueAnswer("Open .gitignore");
     await keepPrivate(Uri.file(root));
