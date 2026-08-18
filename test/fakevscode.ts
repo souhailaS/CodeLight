@@ -110,6 +110,27 @@ export class Position {
   isAfterOrEqual(other: Position): boolean {
     return this.isAfter(other) || this.isEqual(other);
   }
+  compareTo(other: Position): number {
+    if (this.isBefore(other)) {
+      return -1;
+    }
+    return this.isEqual(other) ? 0 : 1;
+  }
+  translate(lines?: number | { lineDelta?: number; characterDelta?: number }, characters?: number): Position {
+    if (typeof lines === "object") {
+      return new Position(
+        this.line + (lines.lineDelta ?? 0),
+        this.character + (lines.characterDelta ?? 0)
+      );
+    }
+    return new Position(this.line + (lines ?? 0), this.character + (characters ?? 0));
+  }
+  with(line?: number | { line?: number; character?: number }, character?: number): Position {
+    if (typeof line === "object") {
+      return new Position(line.line ?? this.line, line.character ?? this.character);
+    }
+    return new Position(line ?? this.line, character ?? this.character);
+  }
 }
 
 export class Range {
@@ -143,6 +164,22 @@ export class Range {
     const to = other instanceof Range ? other.end : other;
     return this.start.isBeforeOrEqual(from) && this.end.isAfterOrEqual(to);
   }
+  intersection(other: Range): Range | undefined {
+    const start = this.start.isAfter(other.start) ? this.start : other.start;
+    const end = this.end.isBefore(other.end) ? this.end : other.end;
+    return start.isAfter(end) ? undefined : new Range(start, end);
+  }
+  union(other: Range): Range {
+    const start = this.start.isBefore(other.start) ? this.start : other.start;
+    const end = this.end.isAfter(other.end) ? this.end : other.end;
+    return new Range(start, end);
+  }
+  with(start?: Position | { start?: Position; end?: Position }, end?: Position): Range {
+    if (start && !(start instanceof Position)) {
+      return new Range(start.start ?? this.start, start.end ?? this.end);
+    }
+    return new Range(start ?? this.start, end ?? this.end);
+  }
 }
 
 export class MarkdownString {
@@ -166,6 +203,130 @@ export class RelativePattern {
     public pattern: string
   ) {}
 }
+
+export enum EndOfLine {
+  LF = 1,
+  CRLF = 2
+}
+
+export class TextDocument {
+  version = 1;
+  isDirty = false;
+  isClosed = false;
+  isUntitled = false;
+  languageId = "typescript";
+  encoding = "utf8";
+  notebook = undefined;
+  eol: EndOfLine = EndOfLine.LF;
+
+  get fileName(): string {
+    return this.uri.fsPath;
+  }
+
+  constructor(
+    public uri: Uri,
+    private body: string
+  ) {}
+
+  get text(): string {
+    return this.body;
+  }
+
+  get lineCount(): number {
+    return this.body.split("\n").length;
+  }
+
+  getText(): string {
+    return this.body;
+  }
+
+  offsetAt(position: Position): number {
+    const lines = this.body.split("\n");
+    let offset = 0;
+    for (let line = 0; line < position.line && line < lines.length; line += 1) {
+      offset += lines[line].length + 1;
+    }
+    const width = lines[Math.min(position.line, lines.length - 1)]?.length ?? 0;
+    return offset + Math.min(position.character, width);
+  }
+
+  positionAt(offset: number): Position {
+    const lines = this.body.split("\n");
+    let left = Math.max(0, Math.min(offset, this.body.length));
+    for (let line = 0; line < lines.length; line += 1) {
+      if (left <= lines[line].length) {
+        return new Position(line, left);
+      }
+      left -= lines[line].length + 1;
+    }
+    return new Position(lines.length - 1, 0);
+  }
+
+  lineAt(at: number | Position): {
+    lineNumber: number;
+    text: string;
+    range: Range;
+    rangeIncludingLineBreak: Range;
+    firstNonWhitespaceCharacterIndex: number;
+    isEmptyOrWhitespace: boolean;
+  } {
+    const line = typeof at === "number" ? at : at.line;
+    const lines = this.body.split("\n");
+    const text = lines[line] ?? "";
+    const last = line >= lines.length - 1;
+    return {
+      lineNumber: line,
+      text,
+      range: new Range(line, 0, line, text.length),
+      rangeIncludingLineBreak: last
+        ? new Range(line, 0, line, text.length)
+        : new Range(line, 0, line + 1, 0),
+      firstNonWhitespaceCharacterIndex: text.length - text.trimStart().length,
+      isEmptyOrWhitespace: text.trim() === ""
+    };
+  }
+
+  validateRange(range: Range): Range {
+    return range;
+  }
+
+  validatePosition(position: Position): Position {
+    return this.positionAt(this.offsetAt(position));
+  }
+
+  getWordRangeAtPosition(position: Position): Range | undefined {
+    void position;
+    return undefined;
+  }
+
+  replace(start: number, length: number, text: string): void {
+    const before = this.body.slice(0, start);
+    const after = this.body.slice(start + length);
+    const range = new Range(this.positionAt(start), this.positionAt(start + length));
+    this.body = `${before}${text}${after}`;
+    this.version += 1;
+    this.isDirty = true;
+    documentChanged.fire({
+      document: this,
+      contentChanges: [{ range, rangeOffset: start, rangeLength: length, text }]
+    });
+  }
+
+  async save(): Promise<boolean> {
+    this.isDirty = false;
+    await Promise.resolve();
+    documentSaved.fire(this);
+    return true;
+  }
+}
+
+export const documentOpened = new EventEmitter<TextDocument>();
+export const documentChanged = new EventEmitter<{
+  document: TextDocument;
+  contentChanges: Array<{ range: Range; rangeOffset: number; rangeLength: number; text: string }>;
+}>();
+export const documentSaved = new EventEmitter<TextDocument>();
+export const documentClosed = new EventEmitter<TextDocument>();
 
 export enum FileType {
   Unknown = 0,
@@ -359,7 +520,7 @@ export function announce(kind: "created" | "changed" | "deleted", target: Uri): 
 
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: Uri; name: string; index: number }>,
-  textDocuments: [] as Array<{ uri: Uri; isDirty: boolean }>,
+  textDocuments: [] as TextDocument[],
   fs: {
     async readFile(target: Uri): Promise<Uint8Array> {
       try {
@@ -461,18 +622,10 @@ export const workspace = {
   onDidChangeConfiguration() {
     return { dispose: () => undefined };
   },
-  onDidOpenTextDocument() {
-    return { dispose: () => undefined };
-  },
-  onDidChangeTextDocument() {
-    return { dispose: () => undefined };
-  },
-  onDidSaveTextDocument() {
-    return { dispose: () => undefined };
-  },
-  onDidCloseTextDocument() {
-    return { dispose: () => undefined };
-  },
+  onDidOpenTextDocument: documentOpened.event,
+  onDidChangeTextDocument: documentChanged.event,
+  onDidSaveTextDocument: documentSaved.event,
+  onDidCloseTextDocument: documentClosed.event,
   getWorkspaceFolder(target: Uri): { uri: Uri; name: string; index: number } | undefined {
     let best: { uri: Uri; name: string; index: number } | undefined;
     for (const folder of workspace.workspaceFolders) {
@@ -516,6 +669,10 @@ export function resetFake(): void {
   messages.length = 0;
   workspace.workspaceFolders = [];
   workspace.textDocuments = [];
+  documentOpened.dispose();
+  documentChanged.dispose();
+  documentSaved.dispose();
+  documentClosed.dispose();
   watchers.length = 0;
   window.activeTextEditor = undefined;
   window.visibleTextEditors = [];
