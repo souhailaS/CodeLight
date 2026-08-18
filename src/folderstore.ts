@@ -2,7 +2,8 @@ import { promisify } from "node:util";
 import { gunzip, gzip } from "node:zlib";
 import * as vscode from "vscode";
 import { inspectTarget, TEMPORARY_NAME, writeThroughTemporary } from "./atomic";
-import { Annotation, parseStore, serializeStore } from "./model";
+import { mergeSides } from "./conflict";
+import { Annotation, hasConflict, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
 import { exists, isMissingFile, statFile, STORE_PATTERN, storeUri } from "./paths";
 
@@ -23,6 +24,7 @@ type DiskState =
       source: vscode.Uri;
     }
   | { status: "missing" }
+  | { status: "conflict"; target: vscode.Uri }
   | { status: "error"; message: string };
 
 interface StoreFiles {
@@ -232,6 +234,10 @@ export class FolderStore implements vscode.Disposable {
         this.reportFailure(disk.message);
         return false;
       }
+      if (disk.status === "conflict") {
+        this.reportConflict(disk.target);
+        return false;
+      }
       if (disk.status === "missing") {
         void vscode.window.showWarningMessage(`CodeLight could not find ${source.fsPath} any more.`);
         return false;
@@ -383,6 +389,10 @@ export class FolderStore implements vscode.Disposable {
         this.reportFailure(disk.message);
         return false;
       }
+      if (disk.status === "conflict") {
+        this.reportConflict(disk.target);
+        return false;
+      }
       const annotations = disk.status === "ok" ? disk.annotations : new Map<string, Annotation>();
       const rejected = disk.status === "ok" ? disk.rejected : [];
       const stale =
@@ -432,6 +442,9 @@ export class FolderStore implements vscode.Disposable {
       return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
     }
     try {
+      if (hasConflict(raw)) {
+        return { status: "conflict", target };
+      }
       const parsed = parseStore(raw);
       return {
         status: "ok",
@@ -494,6 +507,10 @@ export class FolderStore implements vscode.Disposable {
       }
       if (disk.status === "error") {
         this.reportFailure(disk.message);
+        return;
+      }
+      if (disk.status === "conflict") {
+        this.reportConflict(disk.target);
         return;
       }
       this.reportedFailure = undefined;
@@ -602,6 +619,70 @@ export class FolderStore implements vscode.Disposable {
     }
     this.reportedFailure = message;
     void vscode.window.showErrorMessage(message);
+  }
+
+  private reportConflict(target: vscode.Uri): void {
+    void vscode.commands.executeCommand("setContext", "codelight.conflicted", true);
+    const message = `CodeLight cannot read ${target.fsPath} because it has an unresolved merge conflict.`;
+    if (this.reportedFailure === message) {
+      return;
+    }
+    this.reportedFailure = message;
+    void vscode.window
+      .showWarningMessage(message, "Merge the notes", "Open the file")
+      .then(async (chosen) => {
+        if (chosen === "Open the file") {
+          await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(target));
+          return;
+        }
+        if (chosen === "Merge the notes") {
+          await vscode.commands.executeCommand("codelight.resolveConflict");
+        }
+      });
+  }
+
+  async resolveConflict(): Promise<boolean> {
+    const files = this.snapshot();
+    const chosen = await this.enqueue(() => this.pick(files));
+    if (chosen.status === "error") {
+      this.reportFailure(chosen.message);
+      return false;
+    }
+    const target = chosen.target;
+    let raw: string;
+    try {
+      raw = await decodeStore(await vscode.workspace.fs.readFile(target), target);
+    } catch (error) {
+      this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
+      return false;
+    }
+    if (!hasConflict(raw)) {
+      void vscode.window.showInformationMessage(`${target.fsPath} has no merge conflict left in it.`);
+      void vscode.commands.executeCommand("setContext", "codelight.conflicted", false);
+      await this.refresh();
+      return true;
+    }
+    const merged = mergeSides(raw);
+    if (!merged) {
+      void vscode.window.showWarningMessage(
+        `CodeLight could not make sense of the conflict in ${target.fsPath}, so it left the file alone. Resolve it by hand.`
+      );
+      return false;
+    }
+    const content = serializeStore(merged.annotations);
+    try {
+      await this.writeStore(target, content);
+    } catch (error) {
+      this.reportFailure(`CodeLight could not save ${target.fsPath}. ${describe(error)}`);
+      return false;
+    }
+    void vscode.commands.executeCommand("setContext", "codelight.conflicted", false);
+    this.reportedFailure = undefined;
+    await this.refresh();
+    void vscode.window.showInformationMessage(
+      `CodeLight merged the notes, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.`
+    );
+    return true;
   }
 
   private warnAboutInPlace(target: vscode.Uri): void {

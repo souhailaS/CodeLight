@@ -177,6 +177,20 @@ export class AnnotationStore implements vscode.Disposable {
     return this.stores.get(scope.toString()) ?? this.folderFor(scope);
   }
 
+  async resolveConflict(): Promise<boolean> {
+    const folders = this.folders;
+    if (folders.length === 0) {
+      return false;
+    }
+    let done = false;
+    for (const store of folders) {
+      if (await store.resolveConflict()) {
+        done = true;
+      }
+    }
+    return done;
+  }
+
   async refresh(): Promise<void> {
     await Promise.all(this.folders.map((store) => store.refresh()));
   }

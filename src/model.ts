@@ -1,4 +1,16 @@
 export const STORE_VERSION = 1;
+
+const CONFLICT = /^(?:<{7}(?: .*)?|={7}|>{7}(?: .*)?)$/;
+
+export class ConflictError extends Error {
+  constructor() {
+    super("The file has an unresolved merge conflict.");
+  }
+}
+
+export function hasConflict(raw: string): boolean {
+  return raw.split(/\r?\n/).some((line) => CONFLICT.test(line));
+}
 export const MAX_COMMENT_BODY = 2000;
 
 export interface Author {
@@ -178,6 +190,9 @@ export function parseStore(raw: string): ParsedStore {
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
+    if (hasConflict(raw)) {
+      throw new ConflictError();
+    }
     throw new Error("The file is not valid JSON.");
   }
   if (!isRecord(parsed)) {

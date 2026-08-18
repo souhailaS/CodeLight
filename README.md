@@ -33,6 +33,8 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 
 Two commands decide whether the notes travel. **Keep the Notes Out of Git** adds the annotation file to `.gitignore`, and **Take the Notes Out of .gitignore** removes that entry again.
 
+If two of you annotate on different branches, git will leave a merge conflict in the annotation file. CodeLight says so rather than looking empty, and **Merge the Notes After a Conflict** puts both sides back together, keeping every note from each and the newer version of any note you both touched.
+
 Highlights follow your edits. Insert lines above one and it moves with the text. Delete the text it marks and CodeLight looks for it elsewhere in the file before giving up, and if the text comes back the highlight returns with it.
 
 ## Using it
