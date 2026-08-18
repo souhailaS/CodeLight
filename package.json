@@ -672,6 +672,7 @@
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
+    "test": "node test/build.mjs && node --test out/test",
     "vscode:prepublish": "node esbuild.mjs --production"
   },
   "devDependencies": {
