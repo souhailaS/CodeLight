@@ -172,6 +172,68 @@ describe("a highlight while the file is edited", () => {
   });
 });
 
+describe("a file that changed underneath, as a branch switch leaves it", () => {
+  it("does not paint a highlight over code it cannot recognise", async () => {
+    const { store, live } = await open();
+    assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
+    const switched = new TextDocument(
+      Uri.file(nodePath.join(root, "src/a.ts")),
+      ["export function total(cart) {", "  return applyTax(cart.subtotal);", "}", ""].join("\n")
+    );
+    workspace.textDocuments = [switched];
+    assert.ok(live.detachedIn(switched).has("one"));
+  });
+
+  it("still places a highlight whose text only moved", async () => {
+    const { store, live } = await open();
+    assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
+    const moved = new TextDocument(
+      Uri.file(nodePath.join(root, "src/a.ts")),
+      ["// a header", ...SOURCE.split("\n")].join("\n")
+    );
+    workspace.textDocuments = [moved];
+    assert.equal(live.detachedIn(moved).has("one"), false);
+    assert.equal(span(live, moved, "one"), MARKED);
+  });
+
+  it("says so rather than painting a reformatted line it cannot place", async () => {
+    const { store, live } = await open();
+    assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
+    const spaced = new TextDocument(
+      Uri.file(nodePath.join(root, "src/a.ts")),
+      SOURCE.replace(MARKED, "cart.price  *   cart.count")
+    );
+    workspace.textDocuments = [spaced];
+    assert.ok(live.detachedIn(spaced).has("one"));
+  });
+
+  it("keeps a highlight whose text sits where the file says it does", async () => {
+    const { store, live, document } = await open();
+    assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
+    assert.equal(live.detachedIn(document).has("one"), false);
+    assert.equal(span(live, document, "one"), MARKED);
+  });
+
+  it("leaves an orphan out of it, since that state is already known", async () => {
+    const { store, live } = await open();
+    const gone = highlight("one", SOURCE, MARKED);
+    gone.orphaned = true;
+    assert.ok(await store.add(gone));
+    const switched = new TextDocument(
+      Uri.file(nodePath.join(root, "src/a.ts")),
+      "export function nothing() {}\n"
+    );
+    workspace.textDocuments = [switched];
+    assert.equal(live.detachedIn(switched).has("one"), false);
+  });
+
+  it("says nothing about a file no folder holds", async () => {
+    const { live } = await open();
+    const outside = new TextDocument(Uri.file("/elsewhere/a.ts"), SOURCE);
+    assert.deepEqual([...live.detachedIn(outside)], []);
+  });
+});
+
 describe("what a save writes back", () => {
   it("records where the text moved to", async () => {
     const { store, live, document } = await open();

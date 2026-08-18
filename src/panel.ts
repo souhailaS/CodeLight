@@ -67,7 +67,10 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
 
   readonly onDidChangeTreeData = this.emitter.event;
 
-  constructor(private readonly store: AnnotationStore) {
+  constructor(
+    private readonly store: AnnotationStore,
+    private readonly live?: LiveRanges
+  ) {
     this.disposables.push(store.onDidChange(() => this.emitter.fire(undefined)));
   }
 
@@ -125,6 +128,8 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       }
       if (annotation.orphaned === true) {
         parts.push("text deleted");
+      } else if (this.isDetached(annotation)) {
+        parts.push("not in this version");
       }
       item.description = parts.join(", ");
       item.contextValue = annotation.orphaned === true ? "codelight.orphan" : "codelight.annotation";
@@ -152,6 +157,17 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       arguments: [node.annotation.id]
     };
     return item;
+  }
+
+  private isDetached(annotation: Annotation): boolean {
+    const uri = this.store.uriFor(annotation);
+    if (!uri || !this.live) {
+      return false;
+    }
+    const document = vscode.workspace.textDocuments.find(
+      (entry) => entry.uri.toString() === uri.toString()
+    );
+    return document ? this.live.detachedIn(document).has(annotation.id) : false;
   }
 
   private files(): FileNode[] {

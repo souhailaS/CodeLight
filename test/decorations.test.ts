@@ -246,6 +246,19 @@ describe("the colours a folder defines", () => {
     }
   });
 
+  it("paints nothing for a highlight it cannot place in this version of the file", async () => {
+    const { store, view } = await renderer();
+    assert.ok(await store.add(annotation("one", first, "yellow")));
+    const changed = document(first) as { getText(): string };
+    const editor = editorFor({
+      ...changed,
+      getText: () => "let nothing = here;\nlet other = two;\n"
+    });
+    window.visibleTextEditors = [editor];
+    view.renderAll();
+    assert.deepEqual(painted(editor), []);
+  });
+
   it("obeys the inline comment mode of each folder", async () => {
     setFolderConfiguration(Uri.file(second), "codelight.inlineComments", "off");
     const { store, view } = await renderer();
