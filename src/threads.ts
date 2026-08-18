@@ -50,6 +50,7 @@ export class ThreadView implements vscode.Disposable {
   private readonly owners = new Map<vscode.CommentThread, string>();
   private readonly drafts = new Set<string>();
   private readonly lost: string[] = [];
+  private warnedHiddenEdit = false;
   private lostTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number; length: number }>();
   private readonly disposables: vscode.Disposable[] = [];
@@ -84,13 +85,9 @@ export class ThreadView implements vscode.Disposable {
       })
     );
     this.disposables.push(
-      visibility.onDidChange((shown) => {
+      visibility.onDidChange(() => {
         this.controller.commentingRangeProvider = this.rangeProvider();
         this.sync();
-        if (shown) {
-          return;
-        }
-
       })
     );
     this.wire();
@@ -827,9 +824,11 @@ export class ThreadView implements vscode.Disposable {
     const hidden = !this.visibility.visible;
     for (const [id, thread] of this.threads) {
       if (!wanted.has(id)) {
-        if (!hidden && this.store.byId(id) === undefined) {
-          for (const entry of thread.comments) {
-            if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
+        for (const entry of thread.comments) {
+          if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
+            if (hidden) {
+              this.warnedHiddenEdit = true;
+            } else if (this.store.byId(id) === undefined) {
               this.collectLostEdit(entry);
             }
           }
@@ -847,6 +846,12 @@ export class ThreadView implements vscode.Disposable {
       if (!annotation || annotation.comments.length > 0 || annotation.orphaned === true) {
         this.drafts.delete(id);
       }
+    }
+    if (this.warnedHiddenEdit) {
+      this.warnedHiddenEdit = false;
+      void vscode.window.showWarningMessage(
+        "A comment you were editing was closed with the notes. The edit was not kept."
+      );
     }
     for (const [id, entry] of wanted) {
       const existing = this.threads.get(id) ?? this.attach(entry.document, entry.annotation);

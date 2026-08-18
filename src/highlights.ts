@@ -92,13 +92,13 @@ export class HighlightCommands {
       ranges.push(range);
     }
     if (ranges.length === 0) {
-      if (only === undefined) {
-        void vscode.window.showWarningMessage(
-          editor.selections.every((selection) => selection.isEmpty)
+      void vscode.window.showWarningMessage(
+        only !== undefined
+          ? "That text is already highlighted."
+          : editor.selections.every((selection) => selection.isEmpty)
             ? "This line is empty. Select some text to highlight."
             : "Select some text to highlight."
-        );
-      }
+      );
       return [];
     }
     const text = editor.document.getText();

@@ -121,7 +121,7 @@ export class MarkerMode implements vscode.Disposable {
     }
     const stale = matches.filter((id) => this.store.byId(id)?.color !== color.id);
     if (stale.length > 0) {
-      await this.store.transaction((annotations) => {
+      const saved = await this.store.transaction((annotations) => {
         let changed = false;
         for (const id of stale) {
           const current = annotations.get(id);
@@ -133,12 +133,11 @@ export class MarkerMode implements vscode.Disposable {
         }
         return changed;
       });
+      if (!saved) {
+        void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      }
     }
-    this.last = {
-      ids: matches,
-      uri: editor.document.uri.toString(),
-      color: color.id
-    };
+    this.last = undefined;
     return true;
   }
 
@@ -155,7 +154,7 @@ export class MarkerMode implements vscode.Disposable {
   }
 
   private onSelection(event: vscode.TextEditorSelectionChangeEvent): void {
-    if (!this.color) {
+    if (!this.color || event.textEditor !== vscode.window.activeTextEditor) {
       return;
     }
     if (event.selections.every((selection) => selection.isEmpty)) {
@@ -171,9 +170,6 @@ export class MarkerMode implements vscode.Disposable {
       event.kind !== vscode.TextEditorSelectionChangeKind.Keyboard
     ) {
       this.cancel();
-      return;
-    }
-    if (event.textEditor !== vscode.window.activeTextEditor) {
       return;
     }
     const root = this.store.rootUri;
@@ -244,14 +240,17 @@ export class MarkerMode implements vscode.Disposable {
       if (live.isEmpty) {
         continue;
       }
-      if (ranges.some((range) => range.contains(live) && !range.isEqual(live))) {
+      const nested = ranges.some(
+        (range) => !range.isEqual(live) && (range.contains(live) || live.contains(range))
+      );
+      if (nested) {
         doomed.push(id);
       }
     }
     if (doomed.length === 0) {
       return;
     }
-    await this.store.transaction((annotations) => {
+    const saved = await this.store.transaction((annotations) => {
       let changed = false;
       for (const id of doomed) {
         const current = annotations.get(id);
@@ -263,6 +262,9 @@ export class MarkerMode implements vscode.Disposable {
       }
       return changed;
     });
+    if (!saved) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+    }
   }
 
   private catchUp(editor: vscode.TextEditor, marked: readonly vscode.Range[]): void {
