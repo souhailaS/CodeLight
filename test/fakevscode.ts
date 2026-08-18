@@ -404,6 +404,7 @@ export const faults = {
   statSkip: 0,
   interruptWrite: false,
   writeCode: undefined as string | undefined,
+  writeDelayMs: 0,
   errorShape: "vscode" as "vscode" | "node"
 };
 
@@ -446,6 +447,7 @@ export function queueAnswer(answer: string): void {
 export function clearFaults(): void {
   faults.errorShape = "vscode";
   faults.writeCode = undefined;
+  faults.writeDelayMs = 0;
   faults.corruptTemp = false;
   faults.deletePath = undefined;
   faults.statPath = undefined;
@@ -681,6 +683,9 @@ export const workspace = {
       if (faults.interruptWrite) {
         await fs.promises.writeFile(target.path, Buffer.from(bytes).subarray(0, Math.floor(bytes.length / 2)));
         raise(Object.assign(new Error("EIO write interrupted"), { code: "EIO" }), target);
+      }
+      if (faults.writeDelayMs > 0) {
+        await new Promise((done) => setTimeout(done, faults.writeDelayMs));
       }
       try {
         await fs.promises.writeFile(target.path, bytes);

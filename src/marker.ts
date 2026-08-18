@@ -22,6 +22,7 @@ export class MarkerMode implements vscode.Disposable {
   private color: PaletteColor | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private busy = false;
+  private chain = 0;
   private last: Marked | undefined;
 
   constructor(
@@ -39,7 +40,7 @@ export class MarkerMode implements vscode.Disposable {
       vscode.window.onDidChangeTextEditorSelection((event) => this.onSelection(event)),
       vscode.window.onDidChangeActiveTextEditor(() => {
         this.cancel();
-        this.last = undefined;
+        this.breakChain();
       })
     );
     this.disposables.push(
@@ -78,17 +79,22 @@ export class MarkerMode implements vscode.Disposable {
     }
     this.visibility.show();
     this.color = picked;
-    this.last = undefined;
+    this.breakChain();
     this.status.text = `$(edit) Marker ${picked.label}`;
     this.status.tooltip = "CodeLight marker is on. Select text to highlight it. Click to turn off.";
     this.status.show();
     void vscode.commands.executeCommand("setContext", "codelight.marker", true);
   }
 
+  private breakChain(): void {
+    this.chain += 1;
+    this.last = undefined;
+  }
+
   off(): void {
     this.cancel();
     this.color = undefined;
-    this.last = undefined;
+    this.breakChain();
     this.status.hide();
     void vscode.commands.executeCommand("setContext", "codelight.marker", false);
   }
@@ -118,23 +124,21 @@ export class MarkerMode implements vscode.Disposable {
     }
     const stale = matches.filter((id) => this.store.byId(id)?.color !== color.id);
     if (stale.length > 0) {
-      const saved = await this.store.transaction(editor.document.uri, (annotations) => {
-        let changed = false;
-        for (const id of stale) {
-          const current = annotations.get(id);
-          if (!current) {
-            continue;
-          }
-          annotations.set(id, { ...current, color: color.id, updatedAt: timestamp() });
-          changed = true;
+      let saved = true;
+      for (const id of stale) {
+        const done = await this.store.update(id, (current) => ({
+          ...current,
+          color: color.id,
+          updatedAt: timestamp()
+        }));
+        if (!done) {
+          saved = false;
         }
-        return changed;
-      });
+      }
       if (!saved) {
         void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
       }
     }
-    this.last = undefined;
     return true;
   }
 
@@ -151,7 +155,7 @@ export class MarkerMode implements vscode.Disposable {
     }
     if (event.selections.every((selection) => selection.isEmpty)) {
       this.cancel();
-      this.last = undefined;
+      this.breakChain();
       return;
     }
     if (this.busy) {
@@ -179,12 +183,20 @@ export class MarkerMode implements vscode.Disposable {
     if (!color || editor !== vscode.window.activeTextEditor) {
       return;
     }
+    if (!this.renderer.colorsFor(editor.document.uri).some((entry) => entry.id === color.id)) {
+      this.off();
+      void vscode.window.showWarningMessage(
+        `The palette of this folder has no ${color.label}, so the marker stopped. Turn it on again to pick a colour it does have.`
+      );
+      return;
+    }
     const ranges = editor.selections
       .filter((selection) => !selection.isEmpty)
       .map((selection) => new vscode.Range(selection.start, selection.end));
     if (ranges.length === 0) {
       return;
     }
+    const chain = this.chain;
     const previous = this.last;
     if (this.store.relative(editor.document.uri) !== undefined) {
       const recolored = await this.recolorExisting(editor, ranges, color);
@@ -196,15 +208,14 @@ export class MarkerMode implements vscode.Disposable {
     this.busy = true;
     try {
       const created = await this.highlights.add(color, ranges, editor);
-      if (created.length > 0 && this.color && editor === vscode.window.activeTextEditor) {
+      const same = chain === this.chain && this.color !== undefined;
+      if (created.length > 0 && same && editor === vscode.window.activeTextEditor) {
         await this.dropPrevious(previous, editor, ranges);
-        this.last = this.color
-          ? {
-              ids: created.map((annotation) => annotation.id),
-              uri: editor.document.uri.toString(),
-              color: this.color.id
-            }
-          : undefined;
+        this.last = {
+          ids: created.map((annotation) => annotation.id),
+          uri: editor.document.uri.toString(),
+          color: color.id
+        };
       }
     } finally {
       this.busy = false;
