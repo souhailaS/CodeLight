@@ -4,6 +4,7 @@ import { LiveRanges, SpanMap } from "./live";
 import { Comment } from "./model";
 import { readPalette } from "./palette";
 import { basename } from "./panel";
+import { describeSharing, SharingState } from "./sharing";
 import { AnnotationStore } from "./store";
 import { formatDate, snippet } from "./thread";
 
@@ -59,8 +60,10 @@ function styles(): string {
     "  color: var(--vscode-foreground); font-family: var(--vscode-font-family);",
     "  font-size: var(--vscode-font-size); }",
     ".empty { color: var(--vscode-descriptionForeground); }",
-    ".file { margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis;",
+    ".file { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis;",
     "  white-space: nowrap; color: var(--vscode-descriptionForeground); }",
+    ".sharing { margin-bottom: 8px; font-size: 0.85em;",
+    "  color: var(--vscode-descriptionForeground); }",
     ".card { border: 1px solid var(--vscode-panel-border);",
     "  background: var(--vscode-editorWidget-background); border-radius: 5px;",
     "  padding: 7px 9px; margin-bottom: 7px; cursor: pointer; }",
@@ -191,8 +194,10 @@ function renderNote(text: string): string {
   return `<p class="empty">${escapeHtml(text)}</p>`;
 }
 
-function renderHeader(file: string): string {
-  return `<div class="file" title="${escapeHtml(file)}">${escapeHtml(basename(file))}</div>`;
+function renderHeader(file: string, sharing: string): string {
+  const where =
+    sharing === "" ? "" : `<div class="sharing">${escapeHtml(sharing[0].toUpperCase() + sharing.slice(1))}.</div>`;
+  return `<div class="file" title="${escapeHtml(file)}">${escapeHtml(basename(file))}</div>${where}`;
 }
 
 function renderComment(comment: Comment): string {
@@ -246,11 +251,13 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
 
   constructor(
     private readonly store: AnnotationStore,
-    private readonly live: LiveRanges
+    private readonly live: LiveRanges,
+    private readonly shares = new SharingState()
   ) {
     this.disposables.push(
       store.onDidChange(() => {
         this.forgetSpans();
+        this.shares.forget();
         this.render();
       }),
       live.onDidShift((document) => {
@@ -417,6 +424,19 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     return { file: relative, cards };
   }
 
+  private sharing(editor: vscode.TextEditor | undefined): string {
+    const store = editor ? this.store.storeAt(editor.document.uri)?.location : undefined;
+    if (!store) {
+      return "";
+    }
+    const known = this.shares.known(store);
+    if (known === undefined) {
+      void this.shares.of(store).then(() => this.render());
+      return "";
+    }
+    return describeSharing(known);
+  }
+
   private content(editor: vscode.TextEditor | undefined): Content {
     if (!this.loaded) {
       return { head: "", note: "", cards: [] };
@@ -439,7 +459,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
         cards: []
       };
     }
-    const head = renderHeader(found.file);
+    const head = renderHeader(found.file, this.sharing(editor));
     if (found.cards.length === 0) {
       return { head, note: renderNote("No comments in this file yet."), cards: [] };
     }

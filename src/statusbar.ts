@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { describeSharing, SharingState } from "./sharing";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 
@@ -8,13 +9,17 @@ export class FileStatus implements vscode.Disposable {
 
   constructor(
     private readonly store: AnnotationStore,
-    private readonly visibility: Visibility
+    private readonly visibility: Visibility,
+    private readonly sharing = new SharingState()
   ) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
     this.item.command = "codelight.showPanel";
     this.disposables.push(
       this.item,
-      store.onDidChange(() => this.refresh()),
+      store.onDidChange(() => {
+        this.sharing.forget();
+        this.refresh();
+      }),
       vscode.window.onDidChangeActiveTextEditor(() => this.refresh()),
       visibility.onDidChange(() => this.refresh())
     );
@@ -47,8 +52,23 @@ export class FileStatus implements vscode.Disposable {
       stranded === 0
         ? detail
         : `${detail}, ${stranded} of them stranded because the text they marked is gone`;
-    this.item.tooltip = this.visibility.visible ? withStranded : `${withStranded}, currently hidden`;
+    const seen = this.visibility.visible ? withStranded : `${withStranded}, currently hidden`;
+    this.item.tooltip = this.say(seen, editor.document.uri);
     this.item.show();
+  }
+
+  private say(detail: string, target: vscode.Uri): string {
+    const store = this.store.storeAt(target)?.location;
+    if (!store) {
+      return detail;
+    }
+    const known = this.sharing.known(store);
+    if (known === undefined) {
+      void this.sharing.of(store).then(() => this.refresh());
+      return detail;
+    }
+    const sharing = describeSharing(known);
+    return sharing === "" ? detail : `${detail}. ${sharing[0].toUpperCase()}${sharing.slice(1)}`;
   }
 
   dispose(): void {
