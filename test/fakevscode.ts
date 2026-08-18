@@ -182,6 +182,35 @@ export class Range {
   }
 }
 
+export enum TreeItemCollapsibleState {
+  None = 0,
+  Collapsed = 1,
+  Expanded = 2
+}
+
+export class TreeItem {
+  description?: string;
+  contextValue?: string;
+  iconPath?: unknown;
+  id?: string;
+  tooltip?: string;
+  resourceUri?: Uri;
+  command?: { command: string; title: string; arguments?: unknown[] };
+  constructor(
+    public label: string,
+    public collapsibleState: TreeItemCollapsibleState = TreeItemCollapsibleState.None
+  ) {}
+}
+
+export class ThemeIcon {
+  static readonly File = new ThemeIcon("file");
+  static readonly Folder = new ThemeIcon("folder");
+  constructor(
+    public id: string,
+    public color?: ThemeColor
+  ) {}
+}
+
 export class MarkdownString {
   value = "";
   isTrusted = false;

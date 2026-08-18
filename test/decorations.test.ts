@@ -274,6 +274,22 @@ describe("the colours a folder defines", () => {
     assert.equal((there.applied.get(badge) ?? []).length, 0);
   });
 
+  it("makes nothing new once it is disposed", async () => {
+    const { store, view } = await renderer();
+    assert.ok(await store.add(annotation("one", first, "yellow")));
+    const editor = editorFor(document(first));
+    window.visibleTextEditors = [editor];
+    view.renderAll();
+    assert.ok(painted(editor).length > 0);
+    editor.applied.clear();
+    view.dispose();
+    assert.equal(alive(), 0);
+    assert.deepEqual(view.colorsFor(Uri.file(nodePath.join(second, "src/a.ts"))), []);
+    view.renderAll();
+    assert.equal(alive(), 0);
+    assert.deepEqual([...editor.applied.keys()], []);
+  });
+
   it("disposes every decoration it made", async () => {
     const { view } = await renderer();
     view.colorsFor(Uri.file(nodePath.join(first, "src/a.ts")));
