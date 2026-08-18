@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { documentOpened, EndOfLine, resetFake, TextDocument, Uri, workspace } from "./fakevscode";
+import { EndOfLine, resetFake, TextDocument, Uri, workspace } from "./fakevscode";
 import { buildAnchor } from "../src/anchors";
 import { LiveRanges } from "../src/live";
 import { Annotation } from "../src/model";
@@ -61,6 +61,12 @@ async function open(text = SOURCE): Promise<{
   return { store, live, document };
 }
 
+async function settle(check: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !check(); attempt += 1) {
+    await new Promise((done) => setTimeout(done, 5));
+  }
+}
+
 function span(live: LiveRanges, document: TextDocument, id: string): string {
   const spans = live.spansFor(document);
   const found = spans?.get(id);
@@ -113,11 +119,14 @@ describe("a highlight while the file is edited", () => {
     assert.equal(span(live, document, "one"), "cart.price");
   });
 
-  it("collapses when all of its text is deleted", async () => {
+  it("collapses where the text was when all of it is deleted", async () => {
     const { store, live, document } = await open();
     assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
-    document.replace(SOURCE.indexOf(MARKED), MARKED.length, "");
-    assert.equal(span(live, document, "one"), "");
+    const at = SOURCE.indexOf(MARKED);
+    document.replace(at, MARKED.length, "");
+    const found = live.spansFor(document)?.get("one");
+    assert.ok(found);
+    assert.deepEqual(found, { start: at, end: at });
   });
 
   it("leaves a file no folder holds alone", async () => {
@@ -129,11 +138,11 @@ describe("a highlight while the file is edited", () => {
     assert.equal(live.spansFor(outside), undefined);
   });
 
-  it("picks up a file that opens after it started", async () => {
+  it("seeds a file it never saw before the first edit", async () => {
     const { store, live } = await open();
     assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
     const later = new TextDocument(Uri.file(nodePath.join(root, "src/a.ts")), SOURCE);
-    documentOpened.fire(later);
+    later.replace(0, 0, "// a note\n");
     assert.equal(span(live, later, "one"), MARKED);
   });
 
@@ -141,11 +150,25 @@ describe("a highlight while the file is edited", () => {
     const { store, live, document } = await open();
     assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
     assert.equal(span(live, document, "one"), MARKED);
-    document.eol = EndOfLine.CRLF;
-    document.isDirty = true;
-    const before = live.spansFor(document)?.get("one");
-    assert.ok(before);
-    assert.equal(document.getText().slice(before.start, before.end), MARKED);
+    const before = live.spansFor(document)?.get("one")?.start;
+    document.useCrlf();
+    assert.equal(document.eol, EndOfLine.CRLF);
+    const after = live.spansFor(document)?.get("one");
+    assert.ok(after);
+    assert.notEqual(after.start, before);
+    assert.equal(document.getText().slice(after.start, after.end), MARKED);
+  });
+
+  it("shifts every span of a single edit event", async () => {
+    const { store, live, document } = await open();
+    assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
+    assert.ok(await store.add(highlight("two", SOURCE, "cart.count")));
+    document.edit([
+      { start: 0, length: 0, text: "// a header\n" },
+      { start: SOURCE.indexOf("  return"), length: 0, text: "  // and here\n" }
+    ]);
+    assert.equal(span(live, document, "one"), MARKED);
+    assert.equal(span(live, document, "two"), "cart.count");
   });
 });
 
@@ -167,18 +190,38 @@ describe("what a save writes back", () => {
   it("writes nothing when the text did not move", async () => {
     const { store, live, document } = await open();
     assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
-    const before = store.byId("one")?.updatedAt;
+    let wrote = 0;
+    const listener = store.onDidChange(() => {
+      wrote += 1;
+    });
     await live.flushDocument(document);
-    assert.equal(store.byId("one")?.updatedAt, before);
+    listener.dispose();
+    assert.equal(wrote, 0);
     assert.equal(store.byId("one")?.orphaned, undefined);
+  });
+
+  it("writes back when the editor reports the file saved", async () => {
+    const { store, live, document } = await open();
+    assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
+    document.replace(0, 0, "// a note\n");
+    await document.save();
+    await settle(() => store.byId("one")?.range.startLine === 2);
+    assert.equal(store.byId("one")?.range.startLine, 2);
+    assert.equal(live.spansFor(document)?.get("one")?.start, document.getText().indexOf(MARKED));
   });
 
   it("marks the highlight orphaned once its text is gone", async () => {
     const { store, live, document } = await open();
     assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
-    document.replace(SOURCE.indexOf(MARKED), MARKED.length, "");
+    const before = store.byId("one")?.range;
+    document.replace(SOURCE.indexOf("  return"), "  return ".length, "");
+    document.replace(document.getText().indexOf(MARKED), MARKED.length, "");
     await live.flushDocument(document);
-    assert.equal(store.byId("one")?.orphaned, true);
+    const saved = store.byId("one");
+    assert.ok(saved);
+    assert.equal(saved.orphaned, true);
+    assert.notDeepEqual(saved.range, before);
+    assert.equal(saved.range.startCharacter, 0);
   });
 
   it("takes the highlight back when the text is put back", async () => {

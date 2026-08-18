@@ -242,12 +242,15 @@ export class TextDocument {
 
   offsetAt(position: Position): number {
     const lines = this.body.split("\n");
+    if (position.line >= lines.length) {
+      return this.body.length;
+    }
     let offset = 0;
-    for (let line = 0; line < position.line && line < lines.length; line += 1) {
+    for (let line = 0; line < position.line; line += 1) {
       offset += lines[line].length + 1;
     }
-    const width = lines[Math.min(position.line, lines.length - 1)]?.length ?? 0;
-    return offset + Math.min(position.character, width);
+    const width = lines[position.line]?.length ?? 0;
+    return offset + Math.max(0, Math.min(position.character, width));
   }
 
   positionAt(offset: number): Position {
@@ -310,6 +313,30 @@ export class TextDocument {
       document: this,
       contentChanges: [{ range, rangeOffset: start, rangeLength: length, text }]
     });
+  }
+
+  edit(changes: Array<{ start: number; length: number; text: string }>): void {
+    const ordered = [...changes].sort((a, b) => b.start - a.start);
+    const events = ordered.map((change) => ({
+      range: new Range(this.positionAt(change.start), this.positionAt(change.start + change.length)),
+      rangeOffset: change.start,
+      rangeLength: change.length,
+      text: change.text
+    }));
+    for (const change of ordered) {
+      this.body = `${this.body.slice(0, change.start)}${change.text}${this.body.slice(change.start + change.length)}`;
+    }
+    this.version += 1;
+    this.isDirty = true;
+    documentChanged.fire({ document: this, contentChanges: events });
+  }
+
+  useCrlf(): void {
+    this.body = this.body.replace(/\n/g, "\r\n");
+    this.eol = EndOfLine.CRLF;
+    this.version += 1;
+    this.isDirty = true;
+    documentChanged.fire({ document: this, contentChanges: [] });
   }
 
   async save(): Promise<boolean> {
