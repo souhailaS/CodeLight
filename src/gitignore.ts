@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { writeThroughTemporary } from "./atomic";
 import { exists, isMissingFile } from "./paths";
 
 const HEADER = "# CodeLight notes, kept out of git";
@@ -59,13 +60,25 @@ async function readIgnore(root: vscode.Uri): Promise<Ignore | undefined> {
   return { uri, lines, eol };
 }
 
+const reportedInPlace = new Set<string>();
+
 async function writeIgnore(ignore: Ignore, lines: string[]): Promise<boolean> {
   const text = lines.length === 0 ? "" : `${lines.join(ignore.eol)}${ignore.eol}`;
   try {
-    await vscode.workspace.fs.writeFile(ignore.uri, Buffer.from(text, "utf8"));
+    await writeThroughTemporary(ignore.uri, Buffer.from(text, "utf8"), () => {
+      if (reportedInPlace.has(ignore.uri.fsPath)) {
+        return;
+      }
+      reportedInPlace.add(ignore.uri.fsPath);
+      void vscode.window.showWarningMessage(
+        `CodeLight saved ${ignore.uri.fsPath} in place because it cannot create a temporary file. An interrupted save could truncate it.`
+      );
+    });
     return true;
   } catch (error) {
-    void vscode.window.showWarningMessage(`CodeLight could not write ${ignore.uri.fsPath}. ${describe(error)}`);
+    void vscode.window.showWarningMessage(
+      `CodeLight could not write ${ignore.uri.fsPath}, so it was left as it was. ${describe(error)}`
+    );
     return false;
   }
 }
