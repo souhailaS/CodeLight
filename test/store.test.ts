@@ -19,6 +19,7 @@ import {
   workspace
 } from "./fakevscode";
 import { Annotation } from "../src/model";
+import { STORE_PATTERN } from "../src/paths";
 import { AnnotationStore } from "../src/store";
 
 const LIMIT = 64 * 1024 * 1024;
@@ -88,6 +89,10 @@ async function open(mode: "json" | "compressed"): Promise<AnnotationStore> {
   opened.push(store);
   await store.initialize();
   return store;
+}
+
+async function quiet(ms: number): Promise<void> {
+  await new Promise((done) => setTimeout(done, ms));
 }
 
 async function settle(check: () => boolean): Promise<void> {
@@ -704,58 +709,63 @@ describe("a check it cannot make", () => {
 });
 
 describe("the errors the editor raises", () => {
-  it("treats a missing file the same in either error shape", async () => {
-    for (const shape of ["vscode", "node"] as const) {
+  for (const shape of ["vscode", "node"] as const) {
+    it(`treats a missing file the same, ${shape} errors`, async () => {
       faults.errorShape = shape;
       const store = await open("json");
       assert.ok(await store.add(annotation("one")));
       fs.rmSync(jsonPath);
       messages.length = 0;
       await store.refresh();
-      assert.deepEqual(ids(store), [], shape);
-      assert.deepEqual(messages, [], shape);
-      assert.equal(store.location, undefined, shape);
-    }
-  });
+      assert.deepEqual(ids(store), []);
+      assert.deepEqual(messages, []);
+      assert.equal(store.location, undefined);
+    });
 
-  it("falls back to an in place write in either error shape", READ_ONLY_FOLDER, async () => {
-    for (const shape of ["vscode", "node"] as const) {
+    it(`falls back to an in place write, ${shape} errors`, READ_ONLY_FOLDER, async () => {
       faults.errorShape = shape;
-      fs.rmSync(jsonPath, { force: true });
       const store = await open("json");
       assert.ok(await store.add(annotation("one")));
       const before = fs.statSync(jsonPath).ino;
       fs.chmodSync(vscodeDir, 0o500);
       messages.length = 0;
-      assert.ok(await store.add(annotation("two")), shape);
+      assert.ok(await store.add(annotation("two")));
+      assert.ok(await store.add(annotation("three")));
       fs.chmodSync(vscodeDir, 0o700);
-      assert.equal(fs.statSync(jsonPath).ino, before, shape);
-      assert.deepEqual(entries(), ["codelight.json"], shape);
-      assert.equal(warnings().filter((entry) => entry.includes("truncate")).length, 1, shape);
-    }
-  });
+      assert.equal(fs.statSync(jsonPath).ino, before);
+      assert.deepEqual(entries(), ["codelight.json"]);
+      assert.equal(warnings().filter((entry) => entry.includes("truncate")).length, 1);
+    });
 
-  it("reports a read it cannot make in either error shape", async () => {
-    for (const shape of ["vscode", "node"] as const) {
+    it(`reports a read it cannot make, ${shape} errors`, async () => {
       faults.errorShape = shape;
       fs.rmSync(jsonPath, { force: true, recursive: true });
       fs.mkdirSync(jsonPath);
       messages.length = 0;
       await open("json");
-      assert.ok(
-        errors().some((entry) => entry.includes(jsonPath)),
-        shape
-      );
+      assert.ok(errors().some((entry) => entry.includes(jsonPath)));
       fs.rmSync(jsonPath, { recursive: true, force: true });
-    }
+    });
+  }
+
+  it("falls back to an in place write on a read only filesystem", async () => {
+    faults.errorShape = "node";
+    faults.writeCode = "EROFS";
+    const store = await open("json");
+    messages.length = 0;
+    assert.ok(await store.add(annotation("one")));
+    assert.deepEqual(entries(), ["codelight.json"]);
+    assert.equal(warnings().filter((entry) => entry.includes("truncate")).length, 1);
   });
 });
 
 describe("what the file watcher reports", () => {
-  it("watches the folder it is bound to", async () => {
+  it("watches the annotation file of the folder it is bound to", async () => {
     await open("json");
-    const bound = live().filter((watcher) => watcher.pattern !== undefined);
-    assert.equal(bound.length, 1);
+    assert.equal(live().length, 1);
+    const bound = live()[0].pattern as { base: { path: string }; pattern: string };
+    assert.equal(bound.base.path, root);
+    assert.equal(bound.pattern, STORE_PATTERN);
   });
 
   it("picks up a write another window made", async () => {
@@ -794,7 +804,7 @@ describe("what the file watcher reports", () => {
       fired += 1;
     });
     announce("changed", Uri.file(jsonPath));
-    await settle(() => fired > 0);
+    await quiet(400);
     listener.dispose();
     assert.equal(fired, 0);
     assert.deepEqual(ids(store), ["one"]);
@@ -802,9 +812,9 @@ describe("what the file watcher reports", () => {
 
   it("lets the watcher go when the store is disposed", async () => {
     const store = await open("json");
-    assert.equal(live().filter((watcher) => watcher.pattern !== undefined).length, 1);
+    assert.equal(live().length, 1);
     store.dispose();
-    assert.equal(live().filter((watcher) => watcher.pattern !== undefined).length, 0);
+    assert.equal(live().length, 0);
   });
 });
 

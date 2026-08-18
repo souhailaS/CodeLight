@@ -45,9 +45,21 @@ export class FileSystemError extends Error {
     return error;
   }
 
-  static Unavailable(message: string): FileSystemError {
-    const error = new FileSystemError(message);
-    error.code = "Unavailable";
+  static FileIsADirectory(target?: Uri): FileSystemError {
+    const error = new FileSystemError(`file is a directory ${target?.fsPath ?? ""}`.trim());
+    error.code = "FileIsADirectory";
+    return error;
+  }
+
+  static FileNotADirectory(target?: Uri): FileSystemError {
+    const error = new FileSystemError(`file is not a directory ${target?.fsPath ?? ""}`.trim());
+    error.code = "FileNotADirectory";
+    return error;
+  }
+
+  static FileExists(target?: Uri): FileSystemError {
+    const error = new FileSystemError(`file exists ${target?.fsPath ?? ""}`.trim());
+    error.code = "FileExists";
     return error;
   }
 }
@@ -56,7 +68,14 @@ export class EventEmitter<T> {
   private listeners: Array<(value: T) => void> = [];
   event = (listener: (value: T) => void) => {
     this.listeners.push(listener);
-    return { dispose: () => undefined };
+    return {
+      dispose: () => {
+        const at = this.listeners.indexOf(listener);
+        if (at >= 0) {
+          this.listeners.splice(at, 1);
+        }
+      }
+    };
   };
   fire(value: T): void {
     for (const listener of [...this.listeners]) {
@@ -94,6 +113,7 @@ export const faults = {
   statPath: undefined as string | undefined,
   statSkip: 0,
   interruptWrite: false,
+  writeCode: undefined as string | undefined,
   errorShape: "vscode" as "vscode" | "node"
 };
 
@@ -105,10 +125,20 @@ function raise(error: unknown, target: Uri): never {
   if (code === "ENOENT") {
     throw FileSystemError.FileNotFound(target);
   }
-  if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
+  if (code === "EACCES" || code === "EPERM") {
     throw FileSystemError.NoPermissions(target);
   }
-  throw FileSystemError.Unavailable(error instanceof Error ? error.message : String(error));
+  if (code === "EISDIR") {
+    throw FileSystemError.FileIsADirectory(target);
+  }
+  if (code === "ENOTDIR") {
+    throw FileSystemError.FileNotADirectory(target);
+  }
+  if (code === "EEXIST") {
+    throw FileSystemError.FileExists(target);
+  }
+  const unknown = new FileSystemError(error instanceof Error ? error.message : String(error));
+  throw unknown;
 }
 
 export function setConfiguration(key: string, value: unknown): void {
@@ -121,6 +151,7 @@ export function queueAnswer(answer: string): void {
 
 export function clearFaults(): void {
   faults.errorShape = "vscode";
+  faults.writeCode = undefined;
   faults.corruptTemp = false;
   faults.deletePath = undefined;
   faults.statPath = undefined;
@@ -196,6 +227,9 @@ export const workspace = {
       }
     },
     async writeFile(target: Uri, bytes: Uint8Array): Promise<void> {
+      if (faults.writeCode !== undefined && /codelight\.write-.+\.tmp$/.test(target.path)) {
+        raise(Object.assign(new Error(`${faults.writeCode} write failed`), { code: faults.writeCode }), target);
+      }
       if (faults.corruptTemp && /codelight\.write-.+\.tmp$/.test(target.path)) {
         await fs.promises.writeFile(target.path, Buffer.from("corrupted on the way to disk", "utf8"));
         return;
