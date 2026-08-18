@@ -1,6 +1,5 @@
-import { chmod, lstat, rename } from "node:fs/promises";
 import * as vscode from "vscode";
-import { newId } from "./ids";
+import { writeThroughTemporary } from "./atomic";
 import { exists, isMissingFile } from "./paths";
 
 const HEADER = "# CodeLight notes, kept out of git";
@@ -61,43 +60,26 @@ async function readIgnore(root: vscode.Uri): Promise<Ignore | undefined> {
   return { uri, lines, eol };
 }
 
-async function shared(target: vscode.Uri): Promise<{ mode: number } | undefined> {
-  if (target.scheme !== "file") {
-    return undefined;
-  }
-  try {
-    const info = await lstat(target.fsPath);
-    return info.isSymbolicLink() || info.nlink > 1 ? undefined : { mode: info.mode & 0o7777 };
-  } catch {
-    return { mode: 0o644 };
-  }
-}
+let reportedInPlace = false;
 
 async function writeIgnore(ignore: Ignore, lines: string[]): Promise<boolean> {
   const text = lines.length === 0 ? "" : `${lines.join(ignore.eol)}${ignore.eol}`;
-  const bytes = Buffer.from(text, "utf8");
-  const place = await shared(ignore.uri);
-  if (place) {
-    const folder = vscode.Uri.joinPath(ignore.uri, "..");
-    const temporary = vscode.Uri.joinPath(folder, `.gitignore.codelight-${newId()}.tmp`);
-    try {
-      await vscode.workspace.fs.writeFile(temporary, bytes);
-      await chmod(temporary.fsPath, place.mode);
-      await rename(temporary.fsPath, ignore.uri.fsPath);
-      return true;
-    } catch (error) {
-      try {
-        await vscode.workspace.fs.delete(temporary);
-      } catch {
-        void error;
-      }
-    }
-  }
+  const scratch = vscode.Uri.joinPath(ignore.uri, "..", ".vscode");
   try {
-    await vscode.workspace.fs.writeFile(ignore.uri, bytes);
+    await writeThroughTemporary(ignore.uri, Buffer.from(text, "utf8"), scratch, () => {
+      if (reportedInPlace) {
+        return;
+      }
+      reportedInPlace = true;
+      void vscode.window.showWarningMessage(
+        `CodeLight saved ${ignore.uri.fsPath} in place because it cannot create a temporary file. An interrupted save could truncate it.`
+      );
+    });
     return true;
   } catch (error) {
-    void vscode.window.showWarningMessage(`CodeLight could not write ${ignore.uri.fsPath}. ${describe(error)}`);
+    void vscode.window.showWarningMessage(
+      `CodeLight could not write ${ignore.uri.fsPath}, so it was left as it was. ${describe(error)}`
+    );
     return false;
   }
 }

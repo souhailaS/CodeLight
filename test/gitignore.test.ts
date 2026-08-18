@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  faults,
   messages,
   opened,
   queueAnswer,
@@ -132,6 +133,41 @@ describe("keeping the notes out of git", () => {
     fs.chmodSync(ignorePath, 0o640);
     await keepPrivate(Uri.file(root));
     assert.equal(fs.statSync(ignorePath).mode & 0o777, 0o640);
+  });
+
+  it("leaves the file as it was when the write is interrupted", async () => {
+    const before = "node_modules\ndist\n";
+    fs.writeFileSync(ignorePath, before);
+    faults.interruptWrite = true;
+    messages.length = 0;
+    await keepPrivate(Uri.file(root));
+    assert.equal(text(), before);
+    assert.ok(warnings().some((entry) => entry.includes(ignorePath)));
+    assert.deepEqual(
+      fs.readdirSync(nodePath.join(root, ".vscode")).filter((name) => name.endsWith(".tmp")),
+      []
+    );
+  });
+
+  it("says so when it has to save in place", async () => {
+    fs.writeFileSync(ignorePath, "node_modules\n");
+    fs.mkdirSync(nodePath.join(root, ".vscode"), { recursive: true });
+    fs.chmodSync(nodePath.join(root, ".vscode"), 0o500);
+    messages.length = 0;
+    await keepPrivate(Uri.file(root));
+    fs.chmodSync(nodePath.join(root, ".vscode"), 0o700);
+    assert.ok(text().includes("codelight.json"));
+    assert.ok(warnings().some((entry) => entry.includes("in place")));
+  });
+
+  it("leaves a new file to the umask rather than forcing a mode", async () => {
+    const previous = process.umask(0o077);
+    try {
+      await keepPrivate(Uri.file(root));
+    } finally {
+      process.umask(previous);
+    }
+    assert.equal(fs.statSync(ignorePath).mode & 0o077, 0);
   });
 
   it("writes a hard linked file in place", async () => {
