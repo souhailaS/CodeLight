@@ -147,7 +147,7 @@ export class MarkerMode implements vscode.Disposable {
       }
     }
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      void vscode.window.showWarningMessage("CodeLight could not update the annotation file.");
     }
     return true;
   }
@@ -274,7 +274,7 @@ export class MarkerMode implements vscode.Disposable {
       return changed;
     });
     if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      void vscode.window.showWarningMessage("CodeLight could not update the annotation file.");
     }
   }
 

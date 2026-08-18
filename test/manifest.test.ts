@@ -103,7 +103,7 @@ describe("the manifest", () => {
   });
 });
 
-describe("a palette from the shared file", () => {
+describe("a palette from the annotation file", () => {
   it("strips the codicon markup a label could smuggle", () => {
     setConfiguration("codelight.palette", [
       { id: "one", label: "$(trash) Delete everything", hex: "#112233" }
