@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+* Each folder of a multi root workspace now renders with its own palette, opacity, inline comment mode and gutter marks, rather than every folder borrowing whichever settings the window had. The colour picker offers the palette of the folder the file lives in.
+* A file that changes hands between two nested folders no longer keeps the highlights of the folder it left.
+* The two git commands say what happened before they name the file, so the message reads as an answer rather than a path.
+
 ## 0.5.0
 
 Notes you keep to yourself, and workspaces with more than one folder.
