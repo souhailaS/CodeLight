@@ -1,8 +1,7 @@
-import { chmod, lstat, rename } from "node:fs/promises";
 import { promisify } from "node:util";
 import { gunzip, gzip } from "node:zlib";
 import * as vscode from "vscode";
-import { newId } from "./ids";
+import { inspectTarget, TEMPORARY_NAME, writeThroughTemporary } from "./atomic";
 import { Annotation, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
 import { exists, isMissingFile, statFile, STORE_PATTERN, storeUri } from "./paths";
@@ -52,19 +51,6 @@ interface Outcome {
   duplicate: boolean;
 }
 
-interface TargetInfo {
-  shared: boolean;
-  mode: number;
-}
-
-function isPermissionDenied(error: unknown): boolean {
-  if (error instanceof vscode.FileSystemError) {
-    return error.code === "NoPermissions";
-  }
-  const code = typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
-  return code === "EACCES" || code === "EPERM" || code === "EROFS";
-}
-
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -84,24 +70,7 @@ async function decodeStore(bytes: Uint8Array, target: vscode.Uri): Promise<strin
   return text.replace(/^\uFEFF/, "");
 }
 
-const TEMPORARY_NAME = /^codelight\.write-.+\.tmp$/;
 const TEMPORARY_AGE_MS = 10 * 60 * 1000;
-
-function temporaryName(): string {
-  return `codelight.write-${newId()}.tmp`;
-}
-
-async function inspectTarget(target: vscode.Uri): Promise<TargetInfo | undefined> {
-  if (target.scheme !== "file") {
-    return undefined;
-  }
-  try {
-    const info = await lstat(target.fsPath);
-    return { shared: info.isSymbolicLink() || info.nlink > 1, mode: info.mode & 0o7777 };
-  } catch {
-    return undefined;
-  }
-}
 
 function tooLarge(content: string): boolean {
   return Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES;
@@ -551,34 +520,7 @@ export class FolderStore implements vscode.Disposable {
 
   private async writeStore(target: vscode.Uri, content: string): Promise<void> {
     const bytes = await encodeStore(content, target);
-    const folder = vscode.Uri.joinPath(target, "..");
-    await vscode.workspace.fs.createDirectory(folder);
-    const existing = await inspectTarget(target);
-    if (target.scheme !== "file" || existing?.shared) {
-      await vscode.workspace.fs.writeFile(target, bytes);
-      return;
-    }
-    const temporary = vscode.Uri.joinPath(folder, temporaryName());
-    try {
-      await vscode.workspace.fs.writeFile(temporary, bytes);
-    } catch (error) {
-      if (!isPermissionDenied(error)) {
-        await this.cleanup(temporary);
-        throw error;
-      }
-      await vscode.workspace.fs.writeFile(target, bytes);
-      this.warnAboutInPlace(target);
-      return;
-    }
-    try {
-      if (existing) {
-        await chmod(temporary.fsPath, existing.mode);
-      }
-      await rename(temporary.fsPath, target.fsPath);
-    } catch (error) {
-      await this.cleanup(temporary);
-      throw error;
-    }
+    await writeThroughTemporary(target, bytes, () => this.warnAboutInPlace(target));
   }
 
   private async probe(target: vscode.Uri): Promise<boolean | undefined> {
@@ -603,7 +545,11 @@ export class FolderStore implements vscode.Disposable {
   }
 
   private async removeStaleTemporaries(root: vscode.Uri): Promise<void> {
-    const folder = vscode.Uri.joinPath(root, ".vscode");
+    await this.removeStaleFrom(root);
+    await this.removeStaleFrom(vscode.Uri.joinPath(root, ".vscode"));
+  }
+
+  private async removeStaleFrom(folder: vscode.Uri): Promise<void> {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(folder);

@@ -524,6 +524,19 @@ describe("sweeping temporary files", () => {
     assert.deepEqual(entries(), ["codelight.write-new.tmp", "settings.json"]);
   });
 
+  it("removes a stale temporary left in the folder itself", async () => {
+    const stale = nodePath.join(root, "codelight.write-old.tmp");
+    const bystander = nodePath.join(root, "notes.txt");
+    fs.writeFileSync(stale, "half a gitignore");
+    fs.writeFileSync(bystander, "mine");
+    age(stale, -30 * 60);
+    age(bystander, -30 * 60);
+    const store = await open("json");
+    assert.ok(store.isReady);
+    assert.equal(fs.existsSync(stale), false);
+    assert.ok(fs.existsSync(bystander));
+  });
+
   it("removes a temporary file left behind after the next write", async () => {
     const store = await open("json");
     assert.ok(await store.add(annotation("one")));
