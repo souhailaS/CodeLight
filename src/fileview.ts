@@ -393,7 +393,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       return undefined;
     }
     const document = editor.document;
-    const relative = this.store.relative(document.uri) ?? document.uri.path.split("/").pop() ?? "";
+    const relative = this.store.relative(document.uri) ?? "";
     const palette = readPalette(root);
     const annotations = this.store
       .forFile(document.uri)

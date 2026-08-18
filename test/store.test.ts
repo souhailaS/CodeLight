@@ -833,6 +833,43 @@ describe("more than one folder", () => {
     assert.equal(store.location?.fsPath, jsonPath);
   });
 
+  it("answers for a file that two nested folders both cover", async () => {
+    const inner = nodePath.join(root, "packages", "inner");
+    fs.mkdirSync(nodePath.join(inner, ".vscode"), { recursive: true });
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "outer", index: 0 },
+      { uri: Uri.file(inner), name: "inner", index: 1 }
+    ];
+    const store = await open("json");
+    const outer: Annotation = {
+      ...annotation("one"),
+      file: "packages/inner/src/a.ts",
+      root: Uri.file(root).toString()
+    };
+    assert.ok(await store.add(outer));
+    assert.ok(await store.add({ ...annotation("two"), root: Uri.file(inner).toString() }));
+    const target = Uri.file(nodePath.join(inner, "src/a.ts"));
+    assert.deepEqual(
+      store.forFile(target).map((entry) => entry.id).sort(),
+      ["one", "two"]
+    );
+    assert.equal(store.rootFor(target)?.fsPath, inner);
+    assert.equal(store.relative(target), "src/a.ts");
+    assert.equal(store.uriFor(store.byId("one")!)?.fsPath, nodePath.join(inner, "src/a.ts"));
+  });
+
+  it("deletes both copies when two folders hold the same id", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("same", root)));
+    assert.ok(await store.add(tagged("same", second)));
+    assert.ok(await store.remove("same"));
+    assert.deepEqual(ids(store), []);
+    const first = JSON.parse(fs.readFileSync(jsonPath, "utf8")) as { annotations: unknown[] };
+    const other = JSON.parse(fs.readFileSync(secondJson, "utf8")) as { annotations: unknown[] };
+    assert.equal(first.annotations.length, 0);
+    assert.equal(other.annotations.length, 0);
+  });
+
   it("names the folder beside a file when several are open", async () => {
     const store = await open("json");
     assert.equal(store.label(Uri.file(second).toString(), "src"), "second · src");

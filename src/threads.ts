@@ -78,7 +78,7 @@ export class ThreadView implements vscode.Disposable {
         const scoped = vscode.window.visibleTextEditors.some(
           (editor) => readGutterMode(editor.document.uri) === "highlights"
         );
-        if (scoped || readGutterMode(this.store.rootUri) === "highlights") {
+        if (scoped || readGutterMode(undefined) === "highlights") {
           this.controller.commentingRangeProvider = this.rangeProvider();
         }
       })
@@ -213,7 +213,7 @@ export class ThreadView implements vscode.Disposable {
       let ran = false;
       let found = false;
       let lost = false;
-      const scope = this.store.byId(annotationId)?.root;
+      const scope = this.store.byId(annotationId)?.root ?? reply.thread.uri;
       const saved = await this.store.transaction(scope, (annotations) => {
         ran = true;
         const current = annotations.get(annotationId);
@@ -369,7 +369,7 @@ export class ThreadView implements vscode.Disposable {
     const now = timestamp();
     let ran = false;
     let found = false;
-    const scope = this.store.byId(comment.annotationId)?.root;
+    const scope = this.store.byId(comment.annotationId)?.root ?? thread.uri;
     const saved = await this.store.transaction(scope, (annotations) => {
       ran = true;
       const current = annotations.get(comment.annotationId);
@@ -408,6 +408,7 @@ export class ThreadView implements vscode.Disposable {
 
   async deleteComment(comment: ThreadComment): Promise<void> {
     const annotation = this.store.byId(comment.annotationId);
+    const thread = this.threads.get(comment.annotationId);
     if (!annotation) {
       return;
     }
@@ -422,7 +423,7 @@ export class ThreadView implements vscode.Disposable {
     }
     let ran = false;
     let found = false;
-    const scope = this.store.byId(comment.annotationId)?.root;
+    const scope = annotation.root ?? thread?.uri;
     const saved = await this.store.transaction(scope, (annotations) => {
       ran = true;
       const current = annotations.get(comment.annotationId);
@@ -628,7 +629,7 @@ export class ThreadView implements vscode.Disposable {
     let ran = false;
     let found = false;
     let drifted = false;
-    const scope = this.store.byId(id)?.root;
+    const scope = annotation.root ?? thread.uri;
     const saved = await this.store.transaction(scope, (annotations) => {
       ran = true;
       const current = annotations.get(id);

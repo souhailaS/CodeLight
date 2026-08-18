@@ -131,7 +131,7 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       item.iconPath =
         annotation.orphaned === true
           ? new vscode.ThemeIcon("circle-slash")
-          : colorIcon(annotation.color, readPalette(this.store.rootUri));
+          : colorIcon(annotation.color, readPalette(this.store.uriFor(annotation)));
       item.id = `annotation:${annotation.id}`;
       item.tooltip = annotation.anchor.text;
       item.command = {
@@ -262,14 +262,26 @@ export class PanelCommands {
     let removed = false;
     const grouped = new Map<string, Map<string, number>>();
     for (const [id, count] of expected) {
-      const root = this.store.byId(id)?.root;
-      if (root === undefined) {
+      const current = this.store.byId(id);
+      if (!current) {
         missing = true;
         continue;
       }
+      if (current.comments.length !== count) {
+        drifted = true;
+        break;
+      }
+      const root = current.root ?? "";
       const bucket = grouped.get(root) ?? new Map<string, number>();
       bucket.set(id, count);
       grouped.set(root, bucket);
+    }
+    if (drifted) {
+      await this.store.refresh();
+      void vscode.window.showWarningMessage(
+        `Those comments just changed. Run ${retry} again to confirm.`
+      );
+      return;
     }
     let saved = grouped.size > 0;
     for (const [root, bucket] of grouped) {
@@ -293,6 +305,9 @@ export class PanelCommands {
       });
       if (!done) {
         saved = false;
+      }
+      if (drifted) {
+        break;
       }
     }
     if (drifted) {
@@ -359,7 +374,8 @@ export class PanelCommands {
   }
 
   async filterByColor(): Promise<void> {
-    const palette = readPalette(this.store.rootUri);
+    const active = vscode.window.activeTextEditor;
+    const palette = readPalette(active ? this.store.rootFor(active.document.uri) : undefined);
     const used = new Set(this.store.all.map((annotation) => annotation.color));
     const colors: PaletteColor[] = palette.filter((color) => used.has(color.id));
     for (const color of used) {

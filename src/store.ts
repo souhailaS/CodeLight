@@ -54,17 +54,6 @@ export class AnnotationStore implements vscode.Disposable {
     return folders.length === 1 ? folders[0].location : undefined;
   }
 
-  get locations(): vscode.Uri[] {
-    const found: vscode.Uri[] = [];
-    for (const store of this.folders) {
-      const location = store.location;
-      if (location) {
-        found.push(location);
-      }
-    }
-    return found;
-  }
-
   get rootUri(): vscode.Uri | undefined {
     const folders = this.folders;
     return folders.length === 1 ? folders[0].rootUri : undefined;
@@ -127,12 +116,15 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   forFile(target: vscode.Uri): Annotation[] {
-    const store = this.folderFor(target);
-    if (!store) {
-      return [];
+    const found: Annotation[] = [];
+    for (const store of this.folders) {
+      const relative = toRelativePath(store.rootUri, target);
+      if (relative === undefined) {
+        continue;
+      }
+      found.push(...store.forFile(relative));
     }
-    const relative = toRelativePath(store.rootUri, target);
-    return relative === undefined ? [] : store.forFile(relative);
+    return found;
   }
 
   async add(annotation: Annotation): Promise<boolean> {
@@ -141,21 +133,23 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async update(id: string, mutate: (annotation: Annotation) => Annotation): Promise<boolean> {
+    let saved = false;
     for (const store of this.folders) {
-      if (store.byId(id)) {
-        return store.update(id, mutate);
+      if (store.byId(id) && (await store.update(id, mutate))) {
+        saved = true;
       }
     }
-    return false;
+    return saved;
   }
 
   async remove(id: string): Promise<boolean> {
+    let saved = false;
     for (const store of this.folders) {
-      if (store.byId(id)) {
-        return store.remove(id);
+      if (store.byId(id) && (await store.remove(id))) {
+        saved = true;
       }
     }
-    return false;
+    return saved;
   }
 
   async transaction(
