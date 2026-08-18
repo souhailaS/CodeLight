@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import { buildAnchor, findAnchor, Located, MAX_ANCHOR_TEXT } from "./anchors";
 import { Anchor, Annotation, AnnotationRange } from "./model";
-import { toRelativePath } from "./paths";
 import { shiftSpan, Span } from "./ranges";
 import { AnnotationStore } from "./store";
 
@@ -69,7 +68,7 @@ export class LiveRanges implements vscode.Disposable {
     if (!relative) {
       return undefined;
     }
-    return this.sync(document, this.store.forFile(relative)).spans;
+    return this.sync(document, this.store.forFile(document.uri)).spans;
   }
 
   rangeFor(document: vscode.TextDocument, annotation: Annotation, spans?: SpanMap): vscode.Range {
@@ -92,7 +91,7 @@ export class LiveRanges implements vscode.Disposable {
     const key = document.uri.toString();
     const relative = this.relativePath(document);
     const state = relative ? this.documents.get(key) : undefined;
-    const stored = relative ? this.store.forFile(relative) : [];
+    const stored = relative ? this.store.forFile(document.uri) : [];
     if (!state || stored.length === 0) {
       this.holding.delete(key);
       return;
@@ -139,7 +138,7 @@ export class LiveRanges implements vscode.Disposable {
       return;
     }
     const version = document.version;
-    const saved = await this.store.transaction((annotations) => {
+    const saved = await this.store.transaction(document.uri, (annotations) => {
       let changed = false;
       for (const [id, move] of moved) {
         const annotation = annotations.get(id);
@@ -232,8 +231,7 @@ export class LiveRanges implements vscode.Disposable {
   }
 
   private relativePath(document: vscode.TextDocument): string | undefined {
-    const root = this.store.rootUri;
-    return root ? toRelativePath(root, document.uri) : undefined;
+    return this.store.relative(document.uri);
   }
 
   private sync(document: vscode.TextDocument, stored: readonly Annotation[]): DocumentState {

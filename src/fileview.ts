@@ -4,7 +4,6 @@ import { LiveRanges, SpanMap } from "./live";
 import { Comment } from "./model";
 import { readPalette } from "./palette";
 import { basename } from "./panel";
-import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 import { formatDate, snippet } from "./thread";
 
@@ -359,11 +358,10 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private mappable(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
-    const root = this.store.rootUri;
-    if (!editor || !root || editor.document.isClosed) {
+    if (!editor || editor.document.isClosed) {
       return false;
     }
-    return toRelativePath(root, editor.document.uri) !== undefined;
+    return this.store.relative(editor.document.uri) !== undefined;
   }
 
   private editor(): vscode.TextEditor | undefined {
@@ -390,18 +388,15 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private collect(editor: vscode.TextEditor | undefined): FileCards | undefined {
-    const root = this.store.rootUri;
+    const root = editor ? this.store.rootFor(editor.document.uri) : undefined;
     if (!editor || !root) {
       return undefined;
     }
-    const relative = toRelativePath(root, editor.document.uri);
-    if (relative === undefined) {
-      return undefined;
-    }
     const document = editor.document;
+    const relative = this.store.relative(document.uri) ?? document.uri.path.split("/").pop() ?? "";
     const palette = readPalette(root);
     const annotations = this.store
-      .forFile(relative)
+      .forFile(document.uri)
       .filter((annotation) => annotation.comments.length > 0);
     const spans = annotations.length > 0 ? this.spansFor(document) : undefined;
     const cards = annotations
@@ -425,7 +420,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     if (!this.loaded) {
       return { head: "", note: "", cards: [] };
     }
-    if (!this.store.rootUri) {
+    if (!this.store.isReady) {
       return { head: "", note: renderNote("CodeLight needs an open folder."), cards: [] };
     }
     if (this.store.all.length === 0) {

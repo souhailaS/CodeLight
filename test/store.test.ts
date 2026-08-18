@@ -161,10 +161,10 @@ describe("creating a store", () => {
     assert.equal(store.byId("one")?.color, "green");
     assert.equal(await store.update("missing", (entry) => entry), false);
     assert.deepEqual(
-      store.forFile("src/a.ts").map((entry) => entry.id),
+      store.forFile(Uri.file(nodePath.join(root, "src/a.ts"))).map((entry) => entry.id),
       ["one"]
     );
-    assert.deepEqual(store.forFile("src/b.ts"), []);
+    assert.deepEqual(store.forFile(Uri.file(nodePath.join(root, "src/b.ts"))), []);
     assert.ok(await store.remove("one"));
     assert.equal(await store.remove("one"), false);
     assert.deepEqual(ids(store), []);
@@ -497,7 +497,7 @@ describe("writing atomically", () => {
     const store = await open("json");
     assert.ok(await store.add(annotation("one")));
     const before = fs.statSync(jsonPath).mtimeMs;
-    assert.equal(await store.transaction(() => false), false);
+    assert.equal(await store.transaction(undefined, () => false), false);
     assert.equal(fs.statSync(jsonPath).mtimeMs, before);
   });
 });
@@ -635,7 +635,7 @@ describe("a store it cannot read", () => {
     const store = await open("json");
     assert.ok(await store.add(annotation("one")));
     fs.rmSync(jsonPath);
-    assert.equal(await store.remove("missing"), false);
+    assert.equal(await store.transaction(undefined, () => false), false);
     await settle(() => ids(store).length === 0);
     assert.deepEqual(ids(store), []);
     assert.equal(store.location, undefined);
@@ -645,7 +645,7 @@ describe("a store it cannot read", () => {
     const store = await open("json");
     assert.ok(await store.add(annotation("one")));
     fs.writeFileSync(jsonPath, JSON.stringify({ version: 1, annotations: [annotation("two")] }));
-    assert.equal(await store.remove("missing"), false);
+    assert.equal(await store.transaction(undefined, () => false), false);
     await settle(() => ids(store).length === 1 && ids(store)[0] === "two");
     assert.deepEqual(ids(store), ["two"]);
   });
@@ -698,5 +698,144 @@ describe("a check it cannot make", () => {
     clearFaults();
     await guard.refresh();
     assert.deepEqual(ids(guard), ["one"]);
+  });
+});
+
+describe("more than one folder", () => {
+  let second = "";
+  let secondJson = "";
+
+  beforeEach(() => {
+    second = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-second-"));
+    fs.mkdirSync(nodePath.join(second, ".vscode"));
+    secondJson = nodePath.join(second, ".vscode", "codelight.json");
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "first", index: 0 },
+      { uri: Uri.file(second), name: "second", index: 1 }
+    ];
+  });
+
+  afterEach(() => {
+    fs.rmSync(second, { recursive: true, force: true });
+  });
+
+  function tagged(id: string, folder: string): Annotation {
+    return { ...annotation(id), root: Uri.file(folder).toString() };
+  }
+
+  it("keeps a store for every folder", async () => {
+    const store = await open("json");
+    assert.ok(store.isReady);
+    assert.equal(store.folders.length, 2);
+    assert.deepEqual(
+      store.folders.map((folder) => folder.rootUri.fsPath),
+      [root, second]
+    );
+  });
+
+  it("writes each annotation to the file of its own folder", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("one", root)));
+    assert.ok(await store.add(tagged("two", second)));
+    assert.deepEqual(ids(store), ["one", "two"]);
+    const first = JSON.parse(fs.readFileSync(jsonPath, "utf8")) as {
+      annotations: Array<{ id: string }>;
+    };
+    const other = JSON.parse(fs.readFileSync(secondJson, "utf8")) as {
+      annotations: Array<{ id: string }>;
+    };
+    assert.deepEqual(
+      first.annotations.map((entry) => entry.id),
+      ["one"]
+    );
+    assert.deepEqual(
+      other.annotations.map((entry) => entry.id),
+      ["two"]
+    );
+  });
+
+  it("leaves the folder out of the file it writes", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("one", root)));
+    const written = JSON.parse(fs.readFileSync(jsonPath, "utf8")) as {
+      annotations: Array<Record<string, unknown>>;
+    };
+    assert.equal("root" in written.annotations[0], false);
+  });
+
+  it("reads a file back with its folder attached", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("two", second)));
+    await store.refresh();
+    assert.equal(store.byId("two")?.root, Uri.file(second).toString());
+  });
+
+  it("answers for the file in the folder that holds it", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("one", root)));
+    assert.ok(await store.add(tagged("two", second)));
+    assert.deepEqual(
+      store.forFile(Uri.file(nodePath.join(second, "src/a.ts"))).map((entry) => entry.id),
+      ["two"]
+    );
+    assert.equal(store.relative(Uri.file(nodePath.join(second, "src/a.ts"))), "src/a.ts");
+    assert.equal(store.rootFor(Uri.file(nodePath.join(root, "src/a.ts")))?.fsPath, root);
+    assert.equal(store.uriFor(store.byId("two")!)?.fsPath, nodePath.join(second, "src/a.ts"));
+  });
+
+  it("ignores a file that no folder holds", async () => {
+    const store = await open("json");
+    assert.deepEqual(store.forFile(Uri.file("/elsewhere/src/a.ts")), []);
+    assert.equal(store.relative(Uri.file("/elsewhere/src/a.ts")), undefined);
+    assert.equal(store.rootFor(Uri.file("/elsewhere/src/a.ts")), undefined);
+  });
+
+  it("runs a transaction against one folder only", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("one", root)));
+    assert.ok(await store.add(tagged("two", second)));
+    const before = fs.statSync(jsonPath).mtimeMs;
+    assert.ok(
+      await store.transaction(Uri.file(second).toString(), (annotations) => {
+        annotations.delete("two");
+        return true;
+      })
+    );
+    assert.deepEqual(ids(store), ["one"]);
+    assert.equal(fs.statSync(jsonPath).mtimeMs, before);
+  });
+
+  it("removes and updates through the folder that holds the entry", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("two", second)));
+    assert.ok(await store.update("two", (entry) => ({ ...entry, color: "green" })));
+    assert.equal(store.byId("two")?.color, "green");
+    assert.ok(await store.remove("two"));
+    assert.deepEqual(ids(store), []);
+  });
+
+  it("refuses an annotation with no folder while several are open", async () => {
+    const store = await open("json");
+    assert.equal(await store.add(annotation("one")), false);
+    assert.equal(await store.transaction(undefined, () => true), false);
+    assert.equal(store.location, undefined);
+    assert.equal(store.rootUri, undefined);
+  });
+
+  it("drops a folder that leaves the workspace", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("one", root)));
+    assert.ok(await store.add(tagged("two", second)));
+    workspace.workspaceFolders = [{ uri: Uri.file(root), name: "first", index: 0 }];
+    await store.initialize();
+    assert.deepEqual(ids(store), ["one"]);
+    assert.equal(store.folders.length, 1);
+    assert.equal(store.location?.fsPath, jsonPath);
+  });
+
+  it("names the folder beside a file when several are open", async () => {
+    const store = await open("json");
+    assert.equal(store.label(Uri.file(second).toString(), "src"), "second · src");
+    assert.equal(store.label(undefined, "src"), "src");
   });
 });

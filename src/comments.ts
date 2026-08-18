@@ -3,7 +3,6 @@ import { HighlightCommands } from "./highlights";
 import { timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { Annotation, Comment, MAX_COMMENT_BODY } from "./model";
-import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 
 const CREATE = "create";
@@ -91,7 +90,7 @@ export class CommentCommands {
   ): Promise<void> {
     let ran = false;
     let found = false;
-    const saved = await this.store.transaction((annotations) => {
+    const saved = await this.store.transaction(picked.annotation.root, (annotations) => {
       ran = true;
       const current = annotations.get(picked.annotation.id);
       if (!current || !current.comments.some((entry) => entry.id === picked.comment.id)) {
@@ -124,13 +123,10 @@ export class CommentCommands {
       void vscode.window.showWarningMessage("Open a file to comment on.");
       return undefined;
     }
-    const root = this.store.rootUri;
-    const relative = root ? toRelativePath(root, editor.document.uri) : undefined;
-    if (!relative) {
-      const folder = root ? root.path.split("/").pop() : undefined;
+    if (this.store.relative(editor.document.uri) === undefined) {
       void vscode.window.showWarningMessage(
-        folder
-          ? `CodeLight is tracking the folder ${folder} and cannot annotate files outside it.`
+        this.store.isReady
+          ? "CodeLight can only annotate files inside a folder of this workspace."
           : "CodeLight needs an open folder."
       );
       return undefined;

@@ -4,12 +4,23 @@ import * as nodePath from "node:path";
 export class Uri {
   scheme = "file";
   authority = "";
+  query = "";
+  fragment = "";
   constructor(public path: string) {}
   get fsPath(): string {
     return this.path;
   }
   toString(): string {
     return `file://${this.path}`;
+  }
+  toJSON(): unknown {
+    return { scheme: this.scheme, path: this.path };
+  }
+  with(change: { scheme?: string; authority?: string; path?: string }): Uri {
+    const next = new Uri(change.path ?? this.path);
+    next.scheme = change.scheme ?? this.scheme;
+    next.authority = change.authority ?? this.authority;
+    return next;
   }
   static file(value: string): Uri {
     return new Uri(value);
@@ -21,6 +32,18 @@ export class Uri {
 
 export class FileSystemError extends Error {
   code = "Unknown";
+
+  static FileNotFound(target?: Uri): FileSystemError {
+    const error = new FileSystemError(`file not found ${target?.fsPath ?? ""}`.trim());
+    error.code = "FileNotFound";
+    return error;
+  }
+
+  static NoPermissions(target?: Uri): FileSystemError {
+    const error = new FileSystemError(`no permissions ${target?.fsPath ?? ""}`.trim());
+    error.code = "NoPermissions";
+    return error;
+  }
 }
 
 export class EventEmitter<T> {
@@ -170,8 +193,8 @@ export const workspace = {
       }
     };
   },
-  getWorkspaceFolder(): undefined {
-    return undefined;
+  getWorkspaceFolder(target: Uri): { uri: Uri; name: string; index: number } | undefined {
+    return workspace.workspaceFolders.find((folder) => target.path.startsWith(folder.uri.path));
   },
   createFileSystemWatcher() {
     return {

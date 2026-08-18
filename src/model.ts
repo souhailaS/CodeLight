@@ -39,6 +39,7 @@ export interface Annotation {
   comments: Comment[];
   orphaned?: boolean;
   rejectedComments?: unknown[];
+  root?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -224,7 +225,8 @@ function sortAnnotations(annotations: readonly Annotation[]): Annotation[] {
 }
 
 function toWire(annotation: Annotation): Record<string, unknown> {
-  const { rejectedComments, ...rest } = annotation;
+  const { rejectedComments, root, ...rest } = annotation;
+  void root;
   if (!rejectedComments || rejectedComments.length === 0) {
     return rest;
   }

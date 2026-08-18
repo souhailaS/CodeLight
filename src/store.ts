@@ -1,756 +1,266 @@
-import { chmod, lstat, rename } from "node:fs/promises";
-import { promisify } from "node:util";
-import { gunzip, gzip } from "node:zlib";
 import * as vscode from "vscode";
-import { newId } from "./ids";
-import { Annotation, parseStore, serializeStore } from "./model";
-import { readStorageMode } from "./palette";
-import { exists, isMissingFile, resolveRoot, statFile, STORE_PATTERN, storeUri } from "./paths";
+import { FolderStore } from "./folderstore";
+import { Annotation } from "./model";
+import { toRelativePath, toUri } from "./paths";
 
-const RELOAD_DEBOUNCE_MS = 150;
-const MAX_STORE_BYTES = 64 * 1024 * 1024;
-const LIMIT_MB = MAX_STORE_BYTES / 1024 / 1024;
-
-const compress = promisify(gzip);
-const decompress = promisify(gunzip);
-
-type DiskState =
-  | {
-      status: "ok";
-      annotations: Map<string, Annotation>;
-      raw: string;
-      dropped: number;
-      rejected: unknown[];
-      source: vscode.Uri;
-    }
-  | { status: "missing" }
-  | { status: "error"; message: string };
-
-interface StoreFiles {
-  plain: vscode.Uri;
-  compressed: vscode.Uri;
-  fresh: vscode.Uri;
-}
-
-type Duplicate = "yes" | "no" | "unknown";
-
-type Choice =
-  | { status: "ok"; target: vscode.Uri; duplicate: Duplicate }
-  | { status: "error"; message: string };
-
-type Presence =
-  | { status: "ok"; present: boolean; mtime: number }
-  | { status: "error"; message: string };
-
-interface State {
-  present: boolean;
-  mtime: number;
-}
-
-interface Outcome {
-  target: vscode.Uri;
-  duplicate: boolean;
-}
-
-interface TargetInfo {
-  shared: boolean;
-  mode: number;
-}
-
-function isPermissionDenied(error: unknown): boolean {
-  if (error instanceof vscode.FileSystemError) {
-    return error.code === "NoPermissions";
-  }
-  const code = typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
-  return code === "EACCES" || code === "EPERM" || code === "EROFS";
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isCompressed(target: vscode.Uri): boolean {
-  return target.path.endsWith(".gz");
-}
-
-async function decodeStore(bytes: Uint8Array, target: vscode.Uri): Promise<string> {
-  const buffer = Buffer.from(bytes);
-  if (!isCompressed(target) && buffer.byteLength > MAX_STORE_BYTES) {
-    throw new Error(`The file is larger than the ${LIMIT_MB} MB limit.`);
-  }
-  const text = isCompressed(target)
-    ? (await decompress(buffer, { maxOutputLength: MAX_STORE_BYTES })).toString("utf8")
-    : buffer.toString("utf8");
-  return text.replace(/^\uFEFF/, "");
-}
-
-const TEMPORARY_NAME = /^codelight\.write-.+\.tmp$/;
-const TEMPORARY_AGE_MS = 10 * 60 * 1000;
-
-function temporaryName(): string {
-  return `codelight.write-${newId()}.tmp`;
-}
-
-async function inspectTarget(target: vscode.Uri): Promise<TargetInfo | undefined> {
-  if (target.scheme !== "file") {
-    return undefined;
-  }
-  try {
-    const info = await lstat(target.fsPath);
-    return { shared: info.isSymbolicLink() || info.nlink > 1, mode: info.mode & 0o7777 };
-  } catch {
-    return undefined;
-  }
-}
-
-function tooLarge(content: string): boolean {
-  return Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES;
-}
-
-async function encodeStore(content: string, target: vscode.Uri): Promise<Buffer> {
-  if (tooLarge(content)) {
-    throw new Error(
-      `The store is larger than the ${LIMIT_MB} MB limit. Remove some annotations before saving again.`
-    );
-  }
-  const buffer = Buffer.from(content, "utf8");
-  return isCompressed(target) ? compress(buffer) : buffer;
-}
+export { FolderStore } from "./folderstore";
 
 export class AnnotationStore implements vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
   private readonly disposables: vscode.Disposable[] = [];
-  private annotations = new Map<string, Annotation>();
-  private root: vscode.Uri | undefined;
-  private watcher: vscode.FileSystemWatcher | undefined;
-  private reloadTimer: ReturnType<typeof setTimeout> | undefined;
-  private queue: Promise<void> = Promise.resolve();
-  private lastSerialized: string | undefined;
-  private reportedFailure: string | undefined;
-  private reportedDropped = 0;
-  private reportedDuplicate: string | undefined;
-  private reportedInPlace = false;
-  private sweeping = false;
-  private generation = 0;
-  private active: vscode.Uri | undefined;
+  private readonly stores = new Map<string, FolderStore>();
+  private readonly links = new Map<string, vscode.Disposable>();
 
   readonly onDidChange = this.emitter.event;
 
   constructor() {
-    const discovery = vscode.workspace.createFileSystemWatcher(`**/${STORE_PATTERN}`);
-    discovery.onDidCreate(() => void this.bind());
-    discovery.onDidDelete(() => void this.bind());
     this.disposables.push(
-      discovery,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        void this.bind();
+        void this.sync();
       })
     );
   }
 
   async initialize(): Promise<void> {
-    await this.bind();
+    await this.sync();
   }
 
   get isReady(): boolean {
-    return this.root !== undefined;
+    return this.stores.size > 0;
+  }
+
+  get folders(): FolderStore[] {
+    const ordered: FolderStore[] = [];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const store = this.stores.get(folder.uri.toString());
+      if (store) {
+        ordered.push(store);
+      }
+    }
+    for (const store of this.stores.values()) {
+      if (!ordered.includes(store)) {
+        ordered.push(store);
+      }
+    }
+    return ordered;
   }
 
   get all(): Annotation[] {
-    return [...this.annotations.values()];
+    return this.folders.flatMap((store) => store.all);
   }
 
   get location(): vscode.Uri | undefined {
-    return this.active;
+    const folders = this.folders;
+    return folders.length === 1 ? folders[0].location : undefined;
+  }
+
+  get locations(): vscode.Uri[] {
+    const found: vscode.Uri[] = [];
+    for (const store of this.folders) {
+      const location = store.location;
+      if (location) {
+        found.push(location);
+      }
+    }
+    return found;
   }
 
   get rootUri(): vscode.Uri | undefined {
-    return this.root;
+    const folders = this.folders;
+    return folders.length === 1 ? folders[0].rootUri : undefined;
+  }
+
+  folderFor(target: vscode.Uri): FolderStore | undefined {
+    let best: FolderStore | undefined;
+    let longest = -1;
+    for (const store of this.folders) {
+      const relative = toRelativePath(store.rootUri, target);
+      if (relative === undefined) {
+        continue;
+      }
+      const depth = store.rootUri.path.length;
+      if (depth > longest) {
+        best = store;
+        longest = depth;
+      }
+    }
+    return best;
+  }
+
+  label(root: string | undefined, detail: string): string {
+    if (this.stores.size < 2 || root === undefined) {
+      return detail;
+    }
+    const store = this.stores.get(root);
+    if (!store) {
+      return detail;
+    }
+    const name = vscode.workspace.getWorkspaceFolder(store.rootUri)?.name;
+    if (!name) {
+      return detail;
+    }
+    return detail === "" ? name : `${name} · ${detail}`;
+  }
+
+  rootFor(target: vscode.Uri): vscode.Uri | undefined {
+    return this.folderFor(target)?.rootUri;
+  }
+
+  relative(target: vscode.Uri): string | undefined {
+    const store = this.folderFor(target);
+    return store ? toRelativePath(store.rootUri, target) : undefined;
+  }
+
+  uriFor(annotation: Annotation): vscode.Uri | undefined {
+    const store = this.storeOf(annotation);
+    return store ? toUri(store.rootUri, annotation.file) : undefined;
   }
 
   byId(id: string): Annotation | undefined {
-    return this.annotations.get(id);
-  }
-
-  forFile(relativePath: string): Annotation[] {
-    const matches: Annotation[] = [];
-    for (const annotation of this.annotations.values()) {
-      if (annotation.file === relativePath) {
-        matches.push(annotation);
+    for (const store of this.folders) {
+      const found = store.byId(id);
+      if (found) {
+        return found;
       }
     }
-    return matches;
+    return undefined;
+  }
+
+  forFile(target: vscode.Uri): Annotation[] {
+    const store = this.folderFor(target);
+    if (!store) {
+      return [];
+    }
+    const relative = toRelativePath(store.rootUri, target);
+    return relative === undefined ? [] : store.forFile(relative);
   }
 
   async add(annotation: Annotation): Promise<boolean> {
-    return this.commit((annotations) => {
-      annotations.set(annotation.id, annotation);
-      return true;
-    });
+    const store = this.storeOf(annotation);
+    return store ? store.add(annotation) : false;
   }
 
   async update(id: string, mutate: (annotation: Annotation) => Annotation): Promise<boolean> {
-    return this.commit((annotations) => {
-      const existing = annotations.get(id);
-      if (!existing) {
-        return false;
+    for (const store of this.folders) {
+      if (store.byId(id)) {
+        return store.update(id, mutate);
       }
-      annotations.set(id, mutate(existing));
-      return true;
-    });
+    }
+    return false;
   }
 
   async remove(id: string): Promise<boolean> {
-    return this.commit((annotations) => annotations.delete(id));
+    for (const store of this.folders) {
+      if (store.byId(id)) {
+        return store.remove(id);
+      }
+    }
+    return false;
   }
 
-  async transaction(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
-    return this.commit(apply);
+  async transaction(
+    scope: vscode.Uri | string | undefined,
+    apply: (annotations: Map<string, Annotation>) => boolean
+  ): Promise<boolean> {
+    const store = this.storeAt(scope);
+    return store ? store.transaction(apply) : false;
+  }
+
+  storeAt(scope: vscode.Uri | string | undefined): FolderStore | undefined {
+    if (scope === undefined) {
+      const folders = this.folders;
+      return folders.length === 1 ? folders[0] : undefined;
+    }
+    if (typeof scope === "string") {
+      return this.stores.get(scope);
+    }
+    return this.stores.get(scope.toString()) ?? this.folderFor(scope);
   }
 
   async refresh(): Promise<void> {
-    await this.load();
+    await Promise.all(this.folders.map((store) => store.refresh()));
   }
 
   async convertStorage(): Promise<boolean> {
-    const files = this.snapshot();
-    if (!files) {
-      void vscode.window.showWarningMessage("CodeLight needs an open folder.");
-      return false;
-    }
-    const generation = this.generation;
-    const chosen = await this.enqueue(() => this.pick(files));
-    if (generation !== this.generation) {
-      return false;
-    }
-    if (chosen.status === "error") {
-      this.reportFailure(chosen.message);
-      return false;
-    }
-    if (chosen.duplicate === "yes") {
-      void vscode.window.showWarningMessage(
-        `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. Remove the one you do not want before converting.`
-      );
-      return false;
-    }
-    if (chosen.duplicate === "unknown") {
-      void vscode.window.showWarningMessage(
-        `CodeLight could not check both annotation files, so it left ${chosen.target.fsPath} alone.`
-      );
-      return false;
-    }
-    const source = chosen.target;
-    const present = await this.probe(source);
-    if (present === undefined) {
-      return false;
-    }
-    if (!present) {
-      void vscode.window.showInformationMessage("CodeLight has no annotation file to convert yet.");
-      return false;
-    }
-    const info = await inspectTarget(source);
-    if (info?.shared) {
-      void vscode.window.showWarningMessage(
-        `CodeLight left ${source.fsPath} alone because it is a symlink or has another name pointing at it. Converting it would leave that other name behind.`
-      );
-      return false;
-    }
-    const destination = isCompressed(source) ? files.plain : files.compressed;
-    const question = isCompressed(destination)
-      ? `Convert ${source.fsPath} into ${destination.fsPath}? The compressed file is much smaller, but git cannot diff or merge it.`
-      : `Convert ${source.fsPath} into ${destination.fsPath}? The plain file is larger, and git can diff and merge it again.`;
-    const answer = await vscode.window.showWarningMessage(question, { modal: true }, "Convert");
-    if (answer !== "Convert") {
-      return false;
-    }
-    if (generation !== this.generation) {
-      return false;
-    }
-    const converted = await this.enqueue(async () => {
-      if (generation !== this.generation) {
-        return false;
-      }
-      const disk = await this.readDisk(source);
-      if (generation !== this.generation) {
-        return false;
-      }
-      if (disk.status === "error") {
-        this.reportFailure(disk.message);
-        return false;
-      }
-      if (disk.status === "missing") {
-        void vscode.window.showWarningMessage(`CodeLight could not find ${source.fsPath} any more.`);
-        return false;
-      }
-      const taken = await this.probe(destination);
-      if (taken === undefined) {
-        return false;
-      }
-      if (taken) {
-        void vscode.window.showWarningMessage(
-          `CodeLight left ${source.fsPath} alone because ${destination.fsPath} already exists.`
-        );
-        return false;
-      }
-      try {
-        await this.writeStore(destination, disk.raw);
-      } catch (error) {
-        this.reportFailure(
-          `CodeLight could not save annotations to ${destination.fsPath}. ${describe(error)}`
-        );
-        return false;
-      }
-      const written = await this.readDisk(destination);
-      if (written.status !== "ok" || written.raw !== disk.raw) {
-        await this.discard(destination);
-        this.reportFailure(
-          `CodeLight could not read back ${destination.fsPath}, so ${source.fsPath} is left as it was.`
-        );
-        return false;
-      }
-      if (!(await this.discard(source))) {
-        await this.discard(destination);
-        return false;
-      }
-      if (generation !== this.generation) {
-        return true;
-      }
-      this.active = destination;
-      this.annotations = disk.annotations;
-      this.lastSerialized = disk.raw;
-      this.reportedFailure = undefined;
-      this.emitter.fire();
-      void vscode.window.showInformationMessage(`CodeLight now stores annotations in ${destination.fsPath}.`);
-      return true;
-    });
-    return converted;
-  }
-
-  private enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(task, task);
-    this.queue = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
-  }
-
-  private snapshot(): StoreFiles | undefined {
-    const root = this.root;
-    if (!root) {
-      return undefined;
-    }
-    return {
-      plain: storeUri(root, "json"),
-      compressed: storeUri(root, "compressed"),
-      fresh: storeUri(root, readStorageMode(root))
-    };
-  }
-
-  private async inspect(target: vscode.Uri): Promise<Presence> {
-    try {
-      const stat = await statFile(target);
-      return { status: "ok", present: stat !== undefined, mtime: stat ? stat.mtime : 0 };
-    } catch (error) {
-      return { status: "error", message: `CodeLight could not check ${target.fsPath}. ${describe(error)}` };
-    }
-  }
-
-  private resolve(files: StoreFiles, plain: State, compressed: State): Outcome {
-    if (plain.present && compressed.present) {
-      if (plain.mtime > compressed.mtime) {
-        return { target: files.plain, duplicate: true };
-      }
-      return { target: files.compressed, duplicate: true };
-    }
-    if (compressed.present) {
-      return { target: files.compressed, duplicate: false };
-    }
-    if (plain.present) {
-      return { target: files.plain, duplicate: false };
-    }
-    return { target: this.active ?? files.fresh, duplicate: false };
-  }
-
-  private states(presence: Presence): State[] {
-    if (presence.status === "ok") {
-      return [{ present: presence.present, mtime: presence.mtime }];
-    }
-    return [
-      { present: false, mtime: 0 },
-      { present: true, mtime: Number.NEGATIVE_INFINITY }
-    ];
-  }
-
-  private async pick(files: StoreFiles): Promise<Choice> {
-    const plain = await this.inspect(files.plain);
-    const compressed = await this.inspect(files.compressed);
-    const outcomes: Outcome[] = [];
-    for (const plainState of this.states(plain)) {
-      for (const compressedState of this.states(compressed)) {
-        outcomes.push(this.resolve(files, plainState, compressedState));
-      }
-    }
-    const first = outcomes[0];
-    if (outcomes.some((outcome) => outcome.target.toString() !== first.target.toString())) {
-      if (plain.status === "error") {
-        return { status: "error", message: plain.message };
-      }
-      if (compressed.status === "error") {
-        return { status: "error", message: compressed.message };
-      }
-    }
-    const agreed = outcomes.every((outcome) => outcome.duplicate === first.duplicate);
-    if (!agreed) {
-      return { status: "ok", target: first.target, duplicate: "unknown" };
-    }
-    return { status: "ok", target: first.target, duplicate: first.duplicate ? "yes" : "no" };
-  }
-
-  private async commit(apply: (annotations: Map<string, Annotation>) => boolean): Promise<boolean> {
-    const files = this.snapshot();
-    if (!files) {
-      return false;
-    }
-    const generation = this.generation;
-    return this.enqueue(async () => {
-      if (generation !== this.generation) {
-        return false;
-      }
-      const chosen = await this.pick(files);
-      if (generation !== this.generation) {
-        return false;
-      }
-      if (chosen.status === "error") {
-        this.reportFailure(chosen.message);
-        return false;
-      }
-      this.warnAboutDuplicate(chosen.duplicate, chosen.target, files);
-      const target = chosen.target;
-      const disk = await this.readDisk(target);
-      if (generation !== this.generation) {
-        return false;
-      }
-      if (disk.status === "error") {
-        this.reportFailure(disk.message);
-        return false;
-      }
-      const annotations = disk.status === "ok" ? disk.annotations : new Map<string, Annotation>();
-      const rejected = disk.status === "ok" ? disk.rejected : [];
-      const stale =
-        disk.status === "ok"
-          ? disk.raw !== this.lastSerialized || this.active?.toString() !== target.toString()
-          : this.annotations.size > 0 || this.lastSerialized !== undefined;
-      if (!apply(annotations)) {
-        if (stale) {
-          this.scheduleReload();
-        }
-        return false;
-      }
-      const content = serializeStore([...annotations.values()], rejected);
-      try {
-        await this.writeStore(target, content);
-      } catch (error) {
-        this.reportFailure(`CodeLight could not save annotations to ${target.fsPath}. ${describe(error)}`);
-        this.scheduleReload();
-        return false;
-      }
-      if (generation !== this.generation) {
-        return true;
-      }
-      this.active = target;
-      this.annotations = annotations;
-      this.lastSerialized = content;
-      this.reportedFailure = undefined;
-      this.emitter.fire();
-      void this.sweep(vscode.Uri.joinPath(target, "..", ".."));
-      return true;
-    });
-  }
-
-  private async readDisk(target: vscode.Uri): Promise<DiskState> {
-    let raw: string;
-    try {
-      const bytes = await vscode.workspace.fs.readFile(target);
-      raw = await decodeStore(bytes, target);
-    } catch (error) {
-      if (isMissingFile(error)) {
-        return { status: "missing" };
-      }
-      return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
-    }
-    try {
-      const parsed = parseStore(raw);
-      return {
-        status: "ok",
-        raw,
-        dropped: parsed.dropped,
-        rejected: parsed.rejected,
-        annotations: new Map(parsed.annotations.map((entry) => [entry.id, entry])),
-        source: target
-      };
-    } catch (error) {
-      return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
-    }
-  }
-
-  private async bind(): Promise<void> {
-    const root = await resolveRoot(this.root);
-    if (this.root?.toString() === root?.toString()) {
-      if (root) {
-        await this.load();
-      }
-      return;
-    }
-    this.generation += 1;
-    if (this.reloadTimer) {
-      clearTimeout(this.reloadTimer);
-      this.reloadTimer = undefined;
-    }
-    this.watcher?.dispose();
-    this.watcher = undefined;
-    this.root = root;
-    this.active = undefined;
-    this.annotations = new Map();
-    this.lastSerialized = undefined;
-    this.reportedFailure = undefined;
-    this.reportedDropped = 0;
-    this.reportedDuplicate = undefined;
-    this.reportedInPlace = false;
-    if (!root) {
-      this.emitter.fire();
-      return;
-    }
-    await this.sweep(root);
-    const pattern = new vscode.RelativePattern(root, STORE_PATTERN);
-    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-    watcher.onDidCreate(() => this.scheduleReload());
-    watcher.onDidChange(() => this.scheduleReload());
-    watcher.onDidDelete(() => this.scheduleReload());
-    this.watcher = watcher;
-    await this.load();
-  }
-
-  private scheduleReload(): void {
-    if (this.reloadTimer) {
-      clearTimeout(this.reloadTimer);
-    }
-    this.reloadTimer = setTimeout(() => {
-      this.reloadTimer = undefined;
-      void this.load();
-    }, RELOAD_DEBOUNCE_MS);
-  }
-
-  private async load(): Promise<void> {
-    const files = this.snapshot();
-    if (!files) {
-      return;
-    }
-    const generation = this.generation;
-    await this.enqueue(async () => {
-      if (generation !== this.generation) {
-        return;
-      }
-      const chosen = await this.pick(files);
-      if (generation !== this.generation) {
-        return;
-      }
-      if (chosen.status === "error") {
-        this.reportFailure(chosen.message);
-        return;
-      }
-      this.warnAboutDuplicate(chosen.duplicate, chosen.target, files);
-      const target = chosen.target;
-      const disk = await this.readDisk(target);
-      if (generation !== this.generation) {
-        return;
-      }
-      if (disk.status === "error") {
-        this.reportFailure(disk.message);
-        return;
-      }
-      this.reportedFailure = undefined;
-      if (disk.status === "missing") {
-        this.active = undefined;
-        if (this.annotations.size === 0 && this.lastSerialized === undefined) {
-          return;
-        }
-        this.annotations = new Map();
-        this.lastSerialized = undefined;
-        this.emitter.fire();
-        return;
-      }
-      if (disk.raw === this.lastSerialized && this.active?.toString() === target.toString()) {
-        return;
-      }
-      this.active = target;
-      this.annotations = disk.annotations;
-      this.lastSerialized = disk.raw;
-      this.warnAboutDropped(disk.dropped, disk.source);
-      this.emitter.fire();
-    });
-  }
-
-  private async writeStore(target: vscode.Uri, content: string): Promise<void> {
-    const bytes = await encodeStore(content, target);
-    const folder = vscode.Uri.joinPath(target, "..");
-    await vscode.workspace.fs.createDirectory(folder);
-    const existing = await inspectTarget(target);
-    if (target.scheme !== "file" || existing?.shared) {
-      await vscode.workspace.fs.writeFile(target, bytes);
-      return;
-    }
-    const temporary = vscode.Uri.joinPath(folder, temporaryName());
-    try {
-      await vscode.workspace.fs.writeFile(temporary, bytes);
-    } catch (error) {
-      if (!isPermissionDenied(error)) {
-        await this.cleanup(temporary);
-        throw error;
-      }
-      await vscode.workspace.fs.writeFile(target, bytes);
-      this.warnAboutInPlace(target);
-      return;
-    }
-    try {
-      if (existing) {
-        await chmod(temporary.fsPath, existing.mode);
-      }
-      await rename(temporary.fsPath, target.fsPath);
-    } catch (error) {
-      await this.cleanup(temporary);
-      throw error;
-    }
-  }
-
-  private async probe(target: vscode.Uri): Promise<boolean | undefined> {
-    try {
-      return await exists(target);
-    } catch (error) {
-      this.reportFailure(`CodeLight could not check ${target.fsPath}. ${describe(error)}`);
-      return undefined;
-    }
-  }
-
-  private async sweep(root: vscode.Uri): Promise<void> {
-    if (this.sweeping) {
-      return;
-    }
-    this.sweeping = true;
-    try {
-      await this.removeStaleTemporaries(root);
-    } finally {
-      this.sweeping = false;
-    }
-  }
-
-  private async removeStaleTemporaries(root: vscode.Uri): Promise<void> {
-    const folder = vscode.Uri.joinPath(root, ".vscode");
-    let entries: [string, vscode.FileType][];
-    try {
-      entries = await vscode.workspace.fs.readDirectory(folder);
-    } catch {
-      return;
-    }
-    const cutoff = Date.now() - TEMPORARY_AGE_MS;
-    for (const [name, type] of entries) {
-      if (type !== vscode.FileType.File || !TEMPORARY_NAME.test(name)) {
-        continue;
-      }
-      const candidate = vscode.Uri.joinPath(folder, name);
-      let stat: vscode.FileStat;
-      try {
-        stat = await vscode.workspace.fs.stat(candidate);
-      } catch {
-        continue;
-      }
-      if (stat.mtime > cutoff) {
-        continue;
-      }
-      await this.cleanup(candidate);
-    }
-  }
-
-  private async cleanup(temporary: vscode.Uri): Promise<void> {
-    try {
-      await vscode.workspace.fs.delete(temporary);
-    } catch {
-      return;
-    }
-  }
-
-  private async discard(previous: vscode.Uri): Promise<boolean> {
-    try {
-      await vscode.workspace.fs.delete(previous);
-    } catch (error) {
-      if (isMissingFile(error)) {
-        return true;
-      }
-      this.reportFailure(`CodeLight could not remove ${previous.fsPath}. ${describe(error)}`);
-      return false;
-    }
-    return true;
-  }
-
-  private reportFailure(message: string): void {
-    if (this.reportedFailure === message) {
-      return;
-    }
-    this.reportedFailure = message;
-    void vscode.window.showErrorMessage(message);
-  }
-
-  private warnAboutInPlace(target: vscode.Uri): void {
-    if (this.reportedInPlace) {
-      return;
-    }
-    this.reportedInPlace = true;
-    void vscode.window.showWarningMessage(
-      `CodeLight saved ${target.fsPath} in place because it cannot create a temporary file beside it. An interrupted save could truncate the store.`
-    );
-  }
-
-  private warnAboutDuplicate(duplicate: Duplicate, target: vscode.Uri, files: StoreFiles): void {
-    if (duplicate === "unknown") {
-      return;
-    }
-    if (duplicate === "no") {
-      this.reportedDuplicate = undefined;
-      return;
-    }
-    if (this.reportedDuplicate === target.toString()) {
-      return;
-    }
-    this.reportedDuplicate = target.toString();
-    void vscode.window.showWarningMessage(
-      `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${target.fsPath} and leaving the other file alone.`
-    );
-  }
-
-  private warnAboutDropped(dropped: number, target: vscode.Uri): void {
-    if (dropped === this.reportedDropped) {
-      return;
-    }
-    this.reportedDropped = dropped;
-    if (dropped === 0) {
-      return;
-    }
-    const label = dropped === 1 ? "entry" : "entries";
-    void vscode.window.showWarningMessage(
-      `CodeLight skipped ${dropped} unreadable ${label} in ${target.fsPath}. They stay in the file untouched.`
-    );
+    const store = await this.chooseFolder();
+    return store ? store.convertStorage() : false;
   }
 
   dispose(): void {
-    this.generation += 1;
-    if (this.reloadTimer) {
-      clearTimeout(this.reloadTimer);
-      this.reloadTimer = undefined;
+    for (const link of this.links.values()) {
+      link.dispose();
     }
-    this.watcher?.dispose();
+    for (const store of this.stores.values()) {
+      store.dispose();
+    }
+    this.links.clear();
+    this.stores.clear();
     this.emitter.dispose();
     for (const disposable of this.disposables) {
       disposable.dispose();
+    }
+  }
+
+  private storeOf(annotation: Annotation): FolderStore | undefined {
+    if (annotation.root) {
+      return this.stores.get(annotation.root);
+    }
+    const folders = this.folders;
+    return folders.length === 1 ? folders[0] : undefined;
+  }
+
+  private async chooseFolder(): Promise<FolderStore | undefined> {
+    const folders = this.folders;
+    if (folders.length <= 1) {
+      return folders[0];
+    }
+    const active = vscode.window.activeTextEditor;
+    const current = active ? this.folderFor(active.document.uri) : undefined;
+    const picked = await vscode.window.showQuickPick(
+      folders.map((store) => ({
+        label: vscode.workspace.getWorkspaceFolder(store.rootUri)?.name ?? store.rootUri.fsPath,
+        description: store.rootUri.fsPath,
+        picked: store === current,
+        store
+      })),
+      { title: "CodeLight", placeHolder: "Pick the folder to convert" }
+    );
+    return picked?.store;
+  }
+
+  private async sync(): Promise<void> {
+    const wanted = new Map<string, vscode.Uri>();
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      wanted.set(folder.uri.toString(), folder.uri);
+    }
+    let changed = false;
+    for (const [key, store] of [...this.stores]) {
+      if (wanted.has(key)) {
+        continue;
+      }
+      this.links.get(key)?.dispose();
+      this.links.delete(key);
+      store.dispose();
+      this.stores.delete(key);
+      changed = true;
+    }
+    const opening: Promise<void>[] = [];
+    for (const [key, uri] of wanted) {
+      if (this.stores.has(key)) {
+        continue;
+      }
+      const store = new FolderStore(uri);
+      this.stores.set(key, store);
+      this.links.set(
+        key,
+        store.onDidChange(() => this.emitter.fire())
+      );
+      opening.push(store.initialize());
+      changed = true;
+    }
+    await Promise.all(opening);
+    if (changed) {
+      this.emitter.fire();
     }
   }
 }
