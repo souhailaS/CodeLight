@@ -27,22 +27,27 @@ export class FileStatus implements vscode.Disposable {
       this.item.hide();
       return;
     }
-    const annotations = this.store
-      .forFile(editor.document.uri)
-      .filter((annotation) => annotation.orphaned !== true);
-    if (annotations.length === 0) {
+    const all = this.store.forFile(editor.document.uri);
+    if (all.length === 0) {
       this.item.hide();
       return;
     }
-    const comments = annotations.reduce((sum, entry) => sum + entry.comments.length, 0);
+    const annotations = all.filter((annotation) => annotation.orphaned !== true);
+    const stranded = all.length - annotations.length;
+    const comments = all.reduce((sum, entry) => sum + entry.comments.length, 0);
     const notes = `${annotations.length} highlight${annotations.length === 1 ? "" : "s"}`;
     const icon = this.visibility.visible ? "$(bookmark)" : "$(eye-closed)";
-    this.item.text = comments === 0 ? `${icon} ${notes}` : `${icon} ${notes}, ${comments}`;
+    const counts = comments === 0 ? notes : `${notes}, ${comments}`;
+    this.item.text = stranded === 0 ? `${icon} ${counts}` : `${icon} ${counts} $(circle-slash)${stranded}`;
     const detail =
       comments === 0
         ? `CodeLight, ${notes} in this file`
         : `CodeLight, ${notes} and ${comments} comment${comments === 1 ? "" : "s"} in this file`;
-    this.item.tooltip = this.visibility.visible ? detail : `${detail}, currently hidden`;
+    const withStranded =
+      stranded === 0
+        ? detail
+        : `${detail}, ${stranded} of them stranded because the text they marked is gone`;
+    this.item.tooltip = this.visibility.visible ? withStranded : `${withStranded}, currently hidden`;
     this.item.show();
   }
 
