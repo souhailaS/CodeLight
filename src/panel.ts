@@ -262,19 +262,23 @@ export class PanelCommands {
     let removed = false;
     const grouped = new Map<string, Map<string, number>>();
     for (const [id, count] of expected) {
-      const current = this.store.byId(id);
-      if (!current) {
+      const holders = this.store.holdersOf(id);
+      if (holders.length === 0) {
         missing = true;
         continue;
       }
-      if (current.comments.length !== count) {
-        drifted = true;
+      for (const holder of holders) {
+        if (holder.byId(id)?.comments.length !== count) {
+          drifted = true;
+          break;
+        }
+        const bucket = grouped.get(holder.key) ?? new Map<string, number>();
+        bucket.set(id, count);
+        grouped.set(holder.key, bucket);
+      }
+      if (drifted) {
         break;
       }
-      const root = current.root ?? "";
-      const bucket = grouped.get(root) ?? new Map<string, number>();
-      bucket.set(id, count);
-      grouped.set(root, bucket);
     }
     if (drifted) {
       await this.store.refresh();

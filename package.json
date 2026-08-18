@@ -505,6 +505,7 @@
       "title": "CodeLight",
       "properties": {
         "codelight.palette": {
+          "scope": "resource",
           "type": "array",
           "default": [],
           "markdownDescription": "Highlight colors offered in the picker. Leave empty to use the built in palette.",
@@ -529,6 +530,7 @@
           }
         },
         "codelight.inlineComments": {
+          "scope": "resource",
           "type": "string",
           "default": "preview",
           "enum": [
@@ -544,6 +546,7 @@
           "description": "What to show inline after a highlight that has comments."
         },
         "codelight.highlightOpacity": {
+          "scope": "resource",
           "type": "number",
           "default": 0.3,
           "minimum": 0.05,
@@ -567,6 +570,7 @@
           "scope": "resource"
         },
         "codelight.gutterMarks": {
+          "scope": "resource",
           "type": "boolean",
           "default": true,
           "description": "Show a coloured mark in the gutter beside every highlight."

@@ -105,6 +105,10 @@ export class AnnotationStore implements vscode.Disposable {
     return store ? toUri(store.rootUri, annotation.file) : undefined;
   }
 
+  holdersOf(id: string): FolderStore[] {
+    return this.folders.filter((store) => store.byId(id) !== undefined);
+  }
+
   byId(id: string): Annotation | undefined {
     for (const store of this.folders) {
       const found = store.byId(id);
@@ -133,20 +137,22 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async update(id: string, mutate: (annotation: Annotation) => Annotation): Promise<boolean> {
-    let saved = false;
-    for (const store of this.folders) {
-      if (store.byId(id) && (await store.update(id, mutate))) {
-        saved = true;
+    const holders = this.holdersOf(id);
+    let saved = holders.length > 0;
+    for (const store of holders) {
+      if (!(await store.update(id, mutate))) {
+        saved = false;
       }
     }
     return saved;
   }
 
   async remove(id: string): Promise<boolean> {
-    let saved = false;
-    for (const store of this.folders) {
-      if (store.byId(id) && (await store.remove(id))) {
-        saved = true;
+    const holders = this.holdersOf(id);
+    let saved = holders.length > 0;
+    for (const store of holders) {
+      if (!(await store.remove(id))) {
+        saved = false;
       }
     }
     return saved;

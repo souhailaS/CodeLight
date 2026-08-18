@@ -870,6 +870,22 @@ describe("more than one folder", () => {
     assert.equal(other.annotations.length, 0);
   });
 
+  it("lists every folder that holds an id", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(tagged("same", root)));
+    assert.ok(await store.add(tagged("same", second)));
+    assert.ok(await store.add(tagged("one", root)));
+    assert.deepEqual(
+      store.holdersOf("same").map((folder) => folder.rootUri.fsPath),
+      [root, second]
+    );
+    assert.deepEqual(
+      store.holdersOf("one").map((folder) => folder.rootUri.fsPath),
+      [root]
+    );
+    assert.deepEqual(store.holdersOf("gone"), []);
+  });
+
   it("names the folder beside a file when several are open", async () => {
     const store = await open("json");
     assert.equal(store.label(Uri.file(second).toString(), "src"), "second · src");
