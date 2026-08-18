@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { messages, queueAnswer, resetFake, Uri, warnings, workspace } from "./fakevscode";
+import { invoked, messages, queueAnswer, resetFake, Uri, warnings, workspace } from "./fakevscode";
 import { mergeSides, sidesOf } from "../src/conflict";
 import { Annotation, hasConflict, parseStore, serializeStore } from "../src/model";
 import { AnnotationStore } from "../src/store";
@@ -26,13 +26,43 @@ function annotation(id: string, file: string, updatedAt = "2026-08-01T00:00:00.0
   };
 }
 
+const SOLO = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_TERMINAL_PROMPT: "0"
+};
+
+function usable(): boolean {
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const NEEDS_GIT = { skip: usable() ? false : "these tests need git on the path" };
+
 function git(args: string[], cwd: string): void {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "merge.conflictStyle=merge", ...args], {
+    cwd,
+    stdio: "ignore",
+    env: { ...process.env, ...SOLO }
+  });
 }
 
 function conflicted(mine: Annotation[], theirs: Annotation[]): string {
   const repo = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-merge-"));
   const file = nodePath.join(repo, "codelight.json");
+  try {
+    return build(repo, file, mine, theirs);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+}
+
+function build(repo: string, file: string, mine: Annotation[], theirs: Annotation[]): string {
   git(["init", "-q", "-b", "main"], repo);
   git(["config", "user.email", "a@b.c"], repo);
   git(["config", "user.name", "ada"], repo);
@@ -50,9 +80,7 @@ function conflicted(mine: Annotation[], theirs: Annotation[]): string {
   } catch {
     // the conflict is the point
   }
-  const raw = fs.readFileSync(file, "utf8");
-  fs.rmSync(repo, { recursive: true, force: true });
-  return raw;
+  return fs.readFileSync(file, "utf8");
 }
 
 beforeEach(() => {
@@ -70,7 +98,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("a real git conflict in the annotation file", () => {
+describe("a real git conflict in the annotation file", NEEDS_GIT, () => {
   it("is what two people on two branches actually get", () => {
     const raw = conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]);
     assert.ok(hasConflict(raw), raw);
@@ -112,7 +140,11 @@ describe("reading the two sides apart", () => {
       ">>>>>>> other",
       "two"
     ].join("\n");
-    assert.deepEqual(sidesOf(raw), { mine: "one\nmine\ntwo", theirs: "one\ntheirs\ntwo" });
+    assert.deepEqual(sidesOf(raw), {
+      mine: "one\nmine\ntwo",
+      theirs: "one\ntheirs\ntwo",
+      base: "one\nwas\ntwo"
+    });
   });
 
   it("refuses a file whose markers do not nest", () => {
@@ -136,14 +168,14 @@ describe("what the store does about it", () => {
     return store;
   }
 
-  it("says a conflict is a conflict rather than bad json", async () => {
+  it("says a conflict is a conflict rather than bad json", NEEDS_GIT, async () => {
     const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
     assert.ok(warnings().some((line) => line.includes("unresolved merge conflict")), messages.join("\n"));
     assert.equal(warnings().some((line) => line.includes("not valid JSON")), false);
     assert.deepEqual(store.all, []);
   });
 
-  it("merges the file when asked and reads the notes back", async () => {
+  it("merges the file when asked and reads the notes back", NEEDS_GIT, async () => {
     const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
     messages.length = 0;
     assert.equal(await store.resolveConflict(), true);
@@ -156,7 +188,7 @@ describe("what the store does about it", () => {
     assert.ok(messages.some((line) => line.includes("merged the notes")));
   });
 
-  it("can write again once the conflict is merged", async () => {
+  it("can write again once the conflict is merged", NEEDS_GIT, async () => {
     const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
     assert.equal(await store.add(annotation("fresh", "src/c.ts")), false);
     assert.equal(await store.resolveConflict(), true);
@@ -177,7 +209,64 @@ describe("what the store does about it", () => {
     const store = await open(serializeStore([annotation("one", "src/a.ts")]));
     messages.length = 0;
     queueAnswer("");
+    assert.equal(await store.resolveConflict(), false);
+    assert.ok(messages.some((line) => line.includes("no merge conflict to put back together")));
+  });
+
+  it("keeps a note the other side deleted deleted", async () => {
+    const store = await open(
+      [
+        "<<<<<<< HEAD",
+        serializeStore([annotation("base", "src/base.ts"), annotation("mine", "src/a.ts")]).trimEnd(),
+        "||||||| base",
+        serializeStore([annotation("base", "src/base.ts")]).trimEnd(),
+        "=======",
+        serializeStore([]).trimEnd(),
+        ">>>>>>> other"
+      ].join("\n")
+    );
+    messages.length = 0;
     assert.equal(await store.resolveConflict(), true);
-    assert.ok(messages.some((line) => line.includes("no merge conflict left")));
+    assert.deepEqual(
+      store.all.map((entry) => entry.id).sort(),
+      ["mine"]
+    );
+    assert.ok(messages.some((line) => line.includes("stayed deleted")));
+  });
+
+  it("keeps the entries the parser could not read", async () => {
+    const mine = JSON.stringify(
+      { version: 1, annotations: [annotation("mine", "src/a.ts"), { id: "weird", nope: true }] },
+      null,
+      2
+    );
+    const theirs = JSON.stringify({ version: 1, annotations: [annotation("theirs", "src/b.ts")] }, null, 2);
+    const store = await open(["<<<<<<< HEAD", mine, "=======", theirs, ">>>>>>> other"].join("\n"));
+    assert.equal(await store.resolveConflict(), true);
+    const written = fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8");
+    assert.ok(written.includes('"weird"'), written);
+    assert.deepEqual(
+      store.all.map((entry) => entry.id).sort(),
+      ["mine", "theirs"]
+    );
+  });
+
+  it("stops claiming a conflict once the file is fixed by hand", NEEDS_GIT, async () => {
+    const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
+    assert.equal(store.all.length, 0);
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      serializeStore([annotation("byhand", "src/c.ts")])
+    );
+    invoked.length = 0;
+    await store.refresh();
+    assert.deepEqual(
+      store.all.map((entry) => entry.id),
+      ["byhand"]
+    );
+    assert.ok(
+      invoked.some((call) => call[1] === "codelight.conflicted" && call[2] === false),
+      JSON.stringify(invoked)
+    );
   });
 });

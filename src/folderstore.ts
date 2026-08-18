@@ -101,6 +101,7 @@ export class FolderStore implements vscode.Disposable {
   private reportedDuplicate: string | undefined;
   private reportedInPlace = false;
   private sweeping = false;
+  private inConflict = false;
   private generation = 0;
   private active: vscode.Uri | undefined;
 
@@ -514,6 +515,7 @@ export class FolderStore implements vscode.Disposable {
         return;
       }
       this.reportedFailure = undefined;
+      this.clearConflict();
       if (disk.status === "missing") {
         this.active = undefined;
         if (this.annotations.size === 0 && this.lastSerialized === undefined) {
@@ -621,7 +623,13 @@ export class FolderStore implements vscode.Disposable {
     void vscode.window.showErrorMessage(message);
   }
 
+  private clearConflict(): void {
+    this.inConflict = false;
+    void vscode.commands.executeCommand("setContext", "codelight.conflicted", false);
+  }
+
   private reportConflict(target: vscode.Uri): void {
+    this.inConflict = true;
     void vscode.commands.executeCommand("setContext", "codelight.conflicted", true);
     const message = `CodeLight cannot read ${target.fsPath} because it has an unresolved merge conflict.`;
     if (this.reportedFailure === message) {
@@ -641,48 +649,70 @@ export class FolderStore implements vscode.Disposable {
       });
   }
 
-  async resolveConflict(): Promise<boolean> {
+  get conflicted(): boolean {
+    return this.inConflict;
+  }
+
+  async resolveConflict(): Promise<"merged" | "clean" | "stuck" | "skipped"> {
     const files = this.snapshot();
-    const chosen = await this.enqueue(() => this.pick(files));
-    if (chosen.status === "error") {
-      this.reportFailure(chosen.message);
-      return false;
-    }
-    const target = chosen.target;
-    let raw: string;
-    try {
-      raw = await decodeStore(await vscode.workspace.fs.readFile(target), target);
-    } catch (error) {
-      this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
-      return false;
-    }
-    if (!hasConflict(raw)) {
-      void vscode.window.showInformationMessage(`${target.fsPath} has no merge conflict left in it.`);
-      void vscode.commands.executeCommand("setContext", "codelight.conflicted", false);
-      await this.refresh();
-      return true;
-    }
-    const merged = mergeSides(raw);
-    if (!merged) {
-      void vscode.window.showWarningMessage(
-        `CodeLight could not make sense of the conflict in ${target.fsPath}, so it left the file alone. Resolve it by hand.`
+    const generation = this.generation;
+    return this.enqueue(async () => {
+      if (generation !== this.generation) {
+        return "skipped";
+      }
+      const chosen = await this.pick(files);
+      if (chosen.status === "error") {
+        this.reportFailure(chosen.message);
+        return "skipped";
+      }
+      const target = chosen.target;
+      let raw: string;
+      try {
+        raw = await decodeStore(await vscode.workspace.fs.readFile(target), target);
+      } catch (error) {
+        if (isMissingFile(error)) {
+          return "skipped";
+        }
+        this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
+        return "skipped";
+      }
+      if (!hasConflict(raw)) {
+        this.clearConflict();
+        return "clean";
+      }
+      const merged = mergeSides(raw);
+      if (!merged) {
+        void vscode.window.showWarningMessage(
+          `CodeLight could not make sense of the conflict in ${target.fsPath}, so it left the file alone. Resolve it by hand.`
+        );
+        return "stuck";
+      }
+      const content = serializeStore(merged.annotations, merged.rejected);
+      try {
+        await this.writeStore(target, content);
+      } catch (error) {
+        this.reportFailure(`CodeLight could not save ${target.fsPath}. ${describe(error)}`);
+        return "stuck";
+      }
+      if (generation !== this.generation) {
+        return "merged";
+      }
+      this.clearConflict();
+      this.reportedFailure = undefined;
+      const gone =
+        merged.dropped === 0
+          ? ""
+          : ` ${merged.dropped} that one side had deleted stayed deleted.`;
+      void vscode.window.showInformationMessage(
+        `CodeLight merged the notes in ${target.fsPath}, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.${gone}`
       );
-      return false;
-    }
-    const content = serializeStore(merged.annotations);
-    try {
-      await this.writeStore(target, content);
-    } catch (error) {
-      this.reportFailure(`CodeLight could not save ${target.fsPath}. ${describe(error)}`);
-      return false;
-    }
-    void vscode.commands.executeCommand("setContext", "codelight.conflicted", false);
-    this.reportedFailure = undefined;
-    await this.refresh();
-    void vscode.window.showInformationMessage(
-      `CodeLight merged the notes, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.`
-    );
-    return true;
+      return "merged";
+    }).then(async (outcome) => {
+      if (outcome === "merged" || outcome === "clean") {
+        await this.refresh();
+      }
+      return outcome;
+    });
   }
 
   private warnAboutInPlace(target: vscode.Uri): void {

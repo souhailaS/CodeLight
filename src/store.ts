@@ -178,17 +178,19 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async resolveConflict(): Promise<boolean> {
-    const folders = this.folders;
-    if (folders.length === 0) {
-      return false;
-    }
-    let done = false;
-    for (const store of folders) {
-      if (await store.resolveConflict()) {
-        done = true;
+    const stuck = this.folders.filter((store) => store.conflicted);
+    const asked = stuck.length > 0 ? stuck : this.folders;
+    let merged = false;
+    for (const store of asked) {
+      const outcome = await store.resolveConflict();
+      if (outcome === "merged") {
+        merged = true;
       }
     }
-    return done;
+    if (!merged && asked.length > 0) {
+      void vscode.window.showInformationMessage("CodeLight found no merge conflict to put back together.");
+    }
+    return merged;
   }
 
   async refresh(): Promise<void> {
