@@ -88,7 +88,7 @@ export async function keepPrivate(root: vscode.Uri): Promise<void> {
   const missing = ENTRIES.filter((entry) => !present.has(entry));
   if (missing.length === 0 && !negated) {
     void vscode.window.showInformationMessage(
-      `${ignore.uri.fsPath} already keeps the CodeLight notes out of git.`
+      `The CodeLight notes are already out of git, ${ignore.uri.fsPath} names them both.`
     );
     return;
   }
@@ -121,7 +121,7 @@ export async function stopKeepingPrivate(root: vscode.Uri): Promise<void> {
   }
   if (!ignore.lines.some(isEntry)) {
     void vscode.window.showInformationMessage(
-      `${ignore.uri.fsPath} does not ignore the CodeLight notes, so nothing changed.`
+      `The CodeLight notes already go into git, nothing in ${ignore.uri.fsPath} keeps them out.`
     );
     return;
   }
