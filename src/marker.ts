@@ -123,21 +123,31 @@ export class MarkerMode implements vscode.Disposable {
       matches.push(hit.id);
     }
     const stale = matches.filter((id) => this.store.byId(id)?.color !== color.id);
-    if (stale.length > 0) {
-      let saved = true;
-      for (const id of stale) {
-        const done = await this.store.update(id, (current) => ({
-          ...current,
-          color: color.id,
-          updatedAt: timestamp()
-        }));
-        if (!done) {
-          saved = false;
+    const grouped = new Map<string, string[]>();
+    for (const id of stale) {
+      const root = this.store.byId(id)?.root ?? "";
+      grouped.set(root, [...(grouped.get(root) ?? []), id]);
+    }
+    let saved = true;
+    for (const [root, ids] of grouped) {
+      const done = await this.store.transaction(root, (annotations) => {
+        let changed = false;
+        for (const id of ids) {
+          const current = annotations.get(id);
+          if (!current) {
+            continue;
+          }
+          annotations.set(id, { ...current, color: color.id, updatedAt: timestamp() });
+          changed = true;
         }
+        return changed;
+      });
+      if (!done) {
+        saved = false;
       }
-      if (!saved) {
-        void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
-      }
+    }
+    if (!saved) {
+      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
     }
     return true;
   }
@@ -183,6 +193,9 @@ export class MarkerMode implements vscode.Disposable {
     if (!color || editor !== vscode.window.activeTextEditor) {
       return;
     }
+    if (this.store.relative(editor.document.uri) === undefined) {
+      return;
+    }
     if (!this.renderer.colorsFor(editor.document.uri).some((entry) => entry.id === color.id)) {
       this.off();
       void vscode.window.showWarningMessage(
@@ -198,15 +211,12 @@ export class MarkerMode implements vscode.Disposable {
     }
     const chain = this.chain;
     const previous = this.last;
-    if (this.store.relative(editor.document.uri) !== undefined) {
-      const recolored = await this.recolorExisting(editor, ranges, color);
-      if (recolored) {
-        this.catchUp(editor, ranges);
-        return;
-      }
-    }
     this.busy = true;
     try {
+      const recolored = await this.recolorExisting(editor, ranges, color);
+      if (recolored) {
+        return;
+      }
       const created = await this.highlights.add(color, ranges, editor);
       const same = chain === this.chain && this.color !== undefined;
       if (created.length > 0 && same && editor === vscode.window.activeTextEditor) {
@@ -219,8 +229,8 @@ export class MarkerMode implements vscode.Disposable {
       }
     } finally {
       this.busy = false;
+      this.catchUp(editor, ranges);
     }
-    this.catchUp(editor, ranges);
   }
 
   private async dropPrevious(

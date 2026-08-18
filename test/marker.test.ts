@@ -313,11 +313,11 @@ describe("what the marker does under pressure", () => {
   it("keeps a highlight the user finished with when the save was slow", async () => {
     const { store, marker, editor, document } = await rig();
     await turnOn(marker);
-    faults.writeDelayMs = 150;
+    faults.writeDelayMs = 900;
     drive(editor, [select(document, 6, 11)]);
-    await new Promise((done) => setTimeout(done, 650));
+    await new Promise((done) => setTimeout(done, 700));
     drive(editor, [select(document, 6, 6)]);
-    await settle(() => store.all.length === 1);
+    await settle(() => store.all.length === 1, 400);
     faults.writeDelayMs = 0;
     drive(editor, [select(document, 6, 17)]);
     await quiet(store);
@@ -339,6 +339,43 @@ describe("what the marker does under pressure", () => {
     await quiet(store);
     assert.equal(store.all.length, 1);
     assert.equal(store.all[0].anchor.text, "total = one");
+  });
+
+  it("recolours a highlight the outer folder owns", async () => {
+    const inner = nodePath.join(root, "packages", "inner");
+    fs.mkdirSync(nodePath.join(inner, ".vscode"), { recursive: true });
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "root", index: 0 },
+      { uri: Uri.file(inner), name: "inner", index: 1 }
+    ];
+    const { store, marker } = await rig();
+    const nested = new TextDocument(Uri.file(nodePath.join(inner, "src/a.ts")), SOURCE);
+    workspace.textDocuments = [nested];
+    const there = editorFor(nested);
+    (there as unknown as { selections: Range[] }).selections = [];
+    window.activeTextEditor = there;
+    window.visibleTextEditors = [there];
+    assert.ok(
+      await store.add({
+        id: "outer",
+        file: "packages/inner/src/a.ts",
+        range: { startLine: 0, startCharacter: 6, endLine: 0, endCharacter: 11 },
+        anchor: { text: "total", before: "const ", after: " = one" },
+        color: "green",
+        author: { login: "ada", id: "42" },
+        createdAt: "t",
+        updatedAt: "t",
+        comments: [],
+        root: Uri.file(root).toString()
+      })
+    );
+    await turnOn(marker);
+    messages.length = 0;
+    drive(there, [select(nested, 6, 11)]);
+    await quiet(store);
+    assert.equal(store.all.length, 1);
+    assert.equal(store.byId("outer")?.color, "yellow");
+    assert.deepEqual(warnings(), []);
   });
 
   it("stops when the folder it moved to has no such colour", async () => {
