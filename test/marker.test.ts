@@ -60,15 +60,31 @@ async function settle(check: () => boolean, limit = 300): Promise<void> {
   }
 }
 
+function shape(store: AnnotationStore): string {
+  return JSON.stringify(
+    store.all.map((entry) => [entry.anchor.text, entry.color, entry.comments.length]).sort()
+  );
+}
+
+async function reach(store: AnnotationStore, wanted: Array<Array<string | number>>): Promise<void> {
+  const target = JSON.stringify([...wanted].sort());
+  for (let attempt = 0; attempt < 600 && shape(store) !== target; attempt += 1) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+  await quiet(store);
+}
+
 async function quiet(store: AnnotationStore): Promise<void> {
   let seen = "";
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  let steady = 0;
+  for (let attempt = 0; attempt < 400; attempt += 1) {
     await new Promise((done) => setTimeout(done, 10));
-    const now = JSON.stringify(store.all.map((entry) => [entry.id, entry.color]));
-    if (now === seen && attempt > 60) {
+    const now = shape(store);
+    steady = now === seen ? steady + 1 : 0;
+    seen = now;
+    if (attempt > 90 && steady > 30) {
       return;
     }
-    seen = now;
   }
 }
 
@@ -197,7 +213,7 @@ describe("marking while it is on", () => {
     drive(editor, [select(document, 6, 11)]);
     await settle(() => store.all.length === 1);
     drive(editor, [select(document, 6, 17)]);
-    await quiet(store);
+    await reach(store, [["total = one", "yellow", 0]]);
     assert.equal(store.all.length, 1);
     assert.equal(store.all[0].anchor.text, "total = one");
   });
@@ -223,7 +239,10 @@ describe("marking while it is on", () => {
       }))
     );
     drive(editor, [select(document, 6, 17)]);
-    await quiet(store);
+    await reach(store, [
+      ["total", "yellow", 1],
+      ["total = one", "yellow", 0]
+    ]);
     assert.equal(store.all.length, 2);
     assert.ok(store.byId(first));
     assert.equal(store.byId(first)?.comments.length, 1);
@@ -253,7 +272,7 @@ describe("marking while it is on", () => {
     queuePick(1);
     await marker.toggle();
     drive(editor, [select(document, 6, 11)]);
-    await quiet(store);
+    await reach(store, [["total", "yellow", 1]]);
     assert.equal(store.all.length, 1);
     assert.equal(store.byId(first)?.color, "yellow");
     assert.equal(store.byId(first)?.comments.length, 1);
@@ -269,7 +288,7 @@ describe("marking while it is on", () => {
     queuePick(1);
     await marker.toggle();
     drive(editor, [select(document, 6, 11)]);
-    await settle(() => store.byId(first)?.color === "green");
+    await reach(store, [["total", "green", 0]]);
     assert.equal(store.all.length, 1);
     assert.equal(store.byId(first)?.color, "green");
   });
@@ -320,8 +339,10 @@ describe("what the marker does under pressure", () => {
     await settle(() => store.all.length === 1, 400);
     faults.writeDelayMs = 0;
     drive(editor, [select(document, 6, 17)]);
-    await quiet(store);
-    assert.equal(store.all.length, 2);
+    await reach(store, [
+      ["total", "yellow", 0],
+      ["total = one", "yellow", 0]
+    ]);
     assert.deepEqual(
       store.all.map((entry) => entry.anchor.text).sort(),
       ["total", "total = one"]
@@ -336,7 +357,7 @@ describe("what the marker does under pressure", () => {
     drive(editor, [select(document, 6, 11)]);
     await quiet(store);
     drive(editor, [select(document, 6, 17)]);
-    await quiet(store);
+    await reach(store, [["total = one", "yellow", 0]]);
     assert.equal(store.all.length, 1);
     assert.equal(store.all[0].anchor.text, "total = one");
   });
@@ -372,7 +393,7 @@ describe("what the marker does under pressure", () => {
     await turnOn(marker);
     messages.length = 0;
     drive(there, [select(nested, 6, 11)]);
-    await quiet(store);
+    await reach(store, [["total", "yellow", 0]]);
     assert.equal(store.all.length, 1);
     assert.equal(store.byId("outer")?.color, "yellow");
     assert.deepEqual(warnings(), []);
@@ -397,6 +418,7 @@ describe("what the marker does under pressure", () => {
     window.activeTextEditor = there;
     messages.length = 0;
     drive(there, [select(other, 6, 11)]);
+    await settle(() => !marker.active, 400);
     await quiet(store);
     assert.deepEqual(store.all, []);
     assert.equal(marker.active, false);
