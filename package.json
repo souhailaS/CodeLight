@@ -605,15 +605,13 @@
         {
           "id": "codelight.annotations",
           "name": "Annotations",
-          "icon": "media/codelight.svg",
-          "initialSize": 1
+          "icon": "media/codelight.svg"
         },
         {
           "id": "codelight.fileComments",
           "name": "This File",
           "type": "webview",
-          "icon": "media/codelight.svg",
-          "initialSize": 1
+          "icon": "media/codelight.svg"
         }
       ]
     },

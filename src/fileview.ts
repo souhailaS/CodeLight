@@ -61,7 +61,7 @@ function styles(): string {
     ".empty { color: var(--vscode-descriptionForeground); }",
     ".file { margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis;",
     "  white-space: nowrap; color: var(--vscode-descriptionForeground); }",
-    ".card { border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));",
+    ".card { border: 1px solid var(--vscode-panel-border);",
     "  background: var(--vscode-editorWidget-background); border-radius: 5px;",
     "  padding: 7px 9px; margin-bottom: 7px; cursor: pointer; }",
     ".card:hover { background: var(--vscode-list-hoverBackground); }",
