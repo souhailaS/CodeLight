@@ -490,7 +490,24 @@ export const window = {
   },
   showTextDocument(document: unknown) {
     opened.push(document as { uri: Uri });
-    return Promise.resolve(undefined);
+    const editor = {
+      document,
+      selection: new Selection(new Position(0, 0), new Position(0, 0)),
+      selections: [new Selection(new Position(0, 0), new Position(0, 0))],
+      revealRange(): void {
+        return undefined;
+      },
+      setDecorations(): void {
+        return undefined;
+      }
+    };
+    shown.push(editor);
+    return Promise.resolve(editor);
+  },
+  showInputBox(options?: { value?: string }) {
+    inputs.push(options);
+    const answer = typed.shift();
+    return Promise.resolve(answer);
   },
   visibleTextEditors: [] as Editor[],
   onDidChangeVisibleTextEditors() {
@@ -584,6 +601,13 @@ export enum OverviewRulerLane {
 }
 
 export const opened: Array<{ uri: Uri }> = [];
+export const shown: unknown[] = [];
+export const inputs: unknown[] = [];
+const typed: Array<string | undefined> = [];
+
+export function queueInput(value: string | undefined): void {
+  typed.push(value);
+}
 
 export const commands = {
   executeCommand(...rest: unknown[]) {
@@ -799,7 +823,8 @@ export const workspace = {
     return { dispose: () => undefined };
   },
   openTextDocument(target: Uri) {
-    return Promise.resolve({ uri: target });
+    const found = workspace.textDocuments.find((entry) => entry.uri.toString() === target.toString());
+    return Promise.resolve(found ?? { uri: target });
   }
 };
 
@@ -818,6 +843,9 @@ export function resetFake(): void {
   window.activeTextEditor = undefined;
   window.visibleTextEditors = [];
   opened.length = 0;
+  shown.length = 0;
+  inputs.length = 0;
+  typed.length = 0;
   decorations.length = 0;
   invoked.length = 0;
   statusBars.length = 0;
@@ -826,4 +854,116 @@ export function resetFake(): void {
   authentication.session = undefined;
   editorSelectionChanged.dispose();
   activeEditorChanged.dispose();
+}
+
+export enum CommentMode {
+  Editing = 0,
+  Preview = 1
+}
+
+export enum CommentThreadCollapsibleState {
+  Collapsed = 0,
+  Expanded = 1
+}
+
+export enum CommentThreadState {
+  Unresolved = 0,
+  Resolved = 1
+}
+
+export enum TextEditorRevealType {
+  Default = 0,
+  InCenter = 1,
+  InCenterIfOutsideViewport = 2,
+  AtTop = 3
+}
+
+export class Selection extends Range {
+  constructor(anchor: Position | number, active: Position | number, endLine?: number, endCharacter?: number) {
+    super(anchor as never, active as never, endLine, endCharacter);
+  }
+  get anchor(): Position {
+    return this.start;
+  }
+  get active(): Position {
+    return this.end;
+  }
+}
+
+export interface FakeCommentThread {
+  uri: Uri;
+  range: Range | undefined;
+  comments: unknown[];
+  label?: string;
+  contextValue?: string;
+  collapsibleState?: CommentThreadCollapsibleState;
+  disposed: boolean;
+  dispose(): void;
+}
+
+export interface FakeCommentController {
+  id: string;
+  label: string;
+  options: unknown;
+  commentingRangeProvider: unknown;
+  threads: FakeCommentThread[];
+  disposed: boolean;
+  createCommentThread(uri: Uri, range: Range, comments: unknown[]): FakeCommentThread;
+  dispose(): void;
+}
+
+export const controllers: FakeCommentController[] = [];
+
+export const comments = {
+  createCommentController(id: string, label: string): FakeCommentController {
+    const controller: FakeCommentController = {
+      id,
+      label,
+      options: undefined,
+      commentingRangeProvider: undefined,
+      threads: [],
+      disposed: false,
+      createCommentThread(uri: Uri, range: Range, list: unknown[]): FakeCommentThread {
+        const thread: FakeCommentThread = {
+          uri,
+          range,
+          comments: list,
+          disposed: false,
+          dispose(): void {
+            thread.disposed = true;
+          }
+        };
+        controller.threads.push(thread);
+        return thread;
+      },
+      dispose(): void {
+        controller.disposed = true;
+      }
+    };
+    controllers.push(controller);
+    return controller;
+  }
+};
+
+export const clipboard = { text: "", failWrite: false };
+
+export const env = {
+  clipboard: {
+    writeText(value: string): Promise<void> {
+      if (clipboard.failWrite) {
+        return Promise.reject(new Error("clipboard unavailable"));
+      }
+      clipboard.text = value;
+      return Promise.resolve();
+    },
+    readText(): Promise<string> {
+      return Promise.resolve(clipboard.text);
+    }
+  }
+};
+
+export function resetComments(): void {
+  controllers.length = 0;
+  clipboard.text = "";
+  clipboard.failWrite = false;
 }

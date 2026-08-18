@@ -410,6 +410,8 @@ export class ThreadView implements vscode.Disposable {
     const annotation = this.store.byId(comment.annotationId);
     const thread = this.threads.get(comment.annotationId);
     if (!annotation) {
+      void vscode.window.showWarningMessage("That comment is no longer in the shared file.");
+      await this.store.refresh();
       return;
     }
     const last = annotation.comments.length <= 1;
@@ -483,11 +485,11 @@ export class ThreadView implements vscode.Disposable {
     }
     this.visibility.show();
     for (const open of this.pending.keys()) {
-      if (
-        open.uri.toString() === editor.document.uri.toString() &&
-        open.range !== undefined &&
-        !open.range.intersection(range)?.isEmpty
-      ) {
+      const overlap =
+        open.uri.toString() === editor.document.uri.toString() && open.range !== undefined
+          ? open.range.intersection(range)
+          : undefined;
+      if (overlap !== undefined && !overlap.isEmpty) {
         open.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
         editor.selection = new vscode.Selection(range.end, range.end);
         await vscode.commands.executeCommand("workbench.action.focusCommentOnCurrentLine");
@@ -719,6 +721,13 @@ export class ThreadView implements vscode.Disposable {
       const line = document.lineAt(Math.min(anchorLine, document.lineCount - 1));
       range = line.range.isEmpty ? line.rangeIncludingLineBreak : line.range;
     }
+    if (range.isEmpty) {
+      const rescued = comment ? await rescue(comment.body) : false;
+      void vscode.window.showWarningMessage(
+        withRescue("That line is empty. Select some text to comment on.", rescued)
+      );
+      return undefined;
+    }
     const text = document.getText();
     const now = timestamp();
     const annotation: Annotation = {
@@ -823,9 +832,8 @@ export class ThreadView implements vscode.Disposable {
           if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
             if (hidden) {
               this.warnedHiddenEdit = true;
-            } else if (this.store.byId(id) === undefined) {
-              this.collectLostEdit(entry);
             }
+            this.collectLostEdit(entry);
           }
         }
         this.owners.delete(thread);

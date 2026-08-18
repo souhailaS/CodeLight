@@ -3,6 +3,7 @@ import { HighlightCommands } from "./highlights";
 import { timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
 import { Annotation, Comment, MAX_COMMENT_BODY } from "./model";
+import { rescue, withRescue } from "./rescue";
 import { AnnotationStore } from "./store";
 
 const CREATE = "create";
@@ -49,10 +50,13 @@ export class CommentCommands {
       return;
     }
     const now = timestamp();
-    await this.rewrite(picked, (comments) =>
-      comments.map((entry) =>
-        entry.id === picked.comment.id ? { ...entry, body, updatedAt: now } : entry
-      )
+    await this.rewrite(
+      picked,
+      (comments) =>
+        comments.map((entry) =>
+          entry.id === picked.comment.id ? { ...entry, body, updatedAt: now } : entry
+        ),
+      body
     );
   }
 
@@ -86,7 +90,8 @@ export class CommentCommands {
 
   private async rewrite(
     picked: { annotation: Annotation; comment: Comment },
-    change: (comments: Comment[]) => Comment[]
+    change: (comments: Comment[]) => Comment[],
+    typed?: string
   ): Promise<void> {
     let ran = false;
     let found = false;
@@ -104,17 +109,16 @@ export class CommentCommands {
       });
       return true;
     });
-    if (!ran) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+    if (ran && found && saved) {
       return;
     }
-    if (!found) {
-      void vscode.window.showWarningMessage("That comment is no longer in the shared file.");
-      return;
-    }
-    if (!saved) {
-      void vscode.window.showWarningMessage("CodeLight could not save the comment.");
-    }
+    const rescued = typed === undefined ? false : await rescue(typed);
+    const reason = !ran
+      ? "CodeLight could not update the shared file."
+      : found
+        ? "CodeLight could not save the comment."
+        : "That comment is no longer in the shared file.";
+    void vscode.window.showWarningMessage(withRescue(reason, rescued));
   }
 
   private async target(): Promise<Annotation | typeof CREATE | undefined> {
