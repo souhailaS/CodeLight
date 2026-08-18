@@ -3,7 +3,16 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { messages, queueAnswer, resetFake, TreeItemCollapsibleState, Uri, workspace } from "./fakevscode";
+import {
+  messages,
+  queueAnswer,
+  resetFake,
+  ThemeIcon,
+  TreeItemCollapsibleState,
+  Uri,
+  warnings,
+  workspace
+} from "./fakevscode";
 import { LiveRanges } from "../src/live";
 import { Annotation, Comment } from "../src/model";
 import { AnnotationTree, FileNode, Node, PanelCommands } from "../src/panel";
@@ -22,11 +31,14 @@ function comment(id: string, body: string): Comment {
   };
 }
 
+let line = 0;
+
 function annotation(id: string, file: string, color = "yellow"): Annotation {
+  line += 1;
   return {
     id,
     file,
-    range: { startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 5 },
+    range: { startLine: line, startCharacter: 0, endLine: line, endCharacter: 5 },
     anchor: { text: "const", before: "", after: "" },
     color,
     author: { login: "ada", id: "42" },
@@ -55,13 +67,10 @@ function files(tree: AnnotationTree): FileNode[] {
   return tree.getChildren().filter((node): node is FileNode => node.kind === "file");
 }
 
-function warnings(): string[] {
-  return messages.filter((entry) => entry.startsWith("warning "));
-}
-
 beforeEach(() => {
   resetFake();
   closing = [];
+  line = 0;
   root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-panel-"));
   fs.mkdirSync(nodePath.join(root, ".vscode"));
   workspace.workspaceFolders = [{ uri: Uri.file(root), name: "root", index: 0 }];
@@ -87,6 +96,24 @@ describe("the annotation tree", () => {
     assert.deepEqual(
       files(tree)[0].annotations.map((entry) => entry.id),
       ["one", "three"]
+    );
+    assert.deepEqual(
+      files(tree)[0].annotations.map((entry) => entry.range.startLine),
+      [1, 3]
+    );
+  });
+
+  it("orders the rows of a file by the line they sit on", async () => {
+    const { store, tree } = await panel();
+    const lower = annotation("lower", "src/a.ts");
+    lower.range = { startLine: 40, startCharacter: 0, endLine: 40, endCharacter: 5 };
+    const upper = annotation("upper", "src/a.ts");
+    upper.range = { startLine: 4, startCharacter: 0, endLine: 4, endCharacter: 5 };
+    assert.ok(await store.add(lower));
+    assert.ok(await store.add(upper));
+    assert.deepEqual(
+      files(tree)[0].annotations.map((entry) => entry.id),
+      ["upper", "lower"]
     );
   });
 
@@ -135,6 +162,7 @@ describe("the annotation tree", () => {
     assert.equal(row.description, "@ada, 1 comment, text deleted");
     assert.equal(row.contextValue, "codelight.orphan");
     assert.equal(row.collapsibleState, TreeItemCollapsibleState.Collapsed);
+    assert.equal((row.iconPath as ThemeIcon).id, "circle-slash");
   });
 
   it("keeps only one colour while a filter is on", async () => {
@@ -187,6 +215,30 @@ describe("deleting from the panel", () => {
     queueAnswer("Remove");
     await commands.deleteAnnotation("one");
     assert.deepEqual(store.all, []);
+  });
+
+  it("takes the row the tree view hands it", async () => {
+    const { store, tree, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    const row = tree.getChildren(files(tree)[0])[0];
+    await commands.deleteAnnotation(row);
+    assert.deepEqual(store.all, []);
+  });
+
+  it("keeps the file when the question is not answered", async () => {
+    const { store, tree, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    await commands.deleteFile(files(tree)[0]);
+    assert.equal(store.all.length, 1);
+  });
+
+  it("keeps the orphans when the question is not answered", async () => {
+    const { store, commands } = await panel();
+    const gone = annotation("one", "src/a.ts");
+    gone.orphaned = true;
+    assert.ok(await store.add(gone));
+    await commands.deleteOrphansEverywhere();
+    assert.equal(store.all.length, 1);
   });
 
   it("removes every highlight of one file and leaves the others", async () => {
