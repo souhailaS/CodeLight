@@ -108,10 +108,11 @@ export class ThreadView implements vscode.Disposable {
           }
           return document.lineAt(last).range.isEmpty ? [] : [new vscode.Range(0, 0, last, 0)];
         }
-        const spans = this.live.spansFor(document);
+        const placed = this.live.placedIn(document);
+        const spans = placed.spans;
         const lines = new Set<number>();
         for (const annotation of this.store.forFile(document.uri)) {
-          if (annotation.orphaned === true) {
+          if (annotation.orphaned === true || placed.detached.has(annotation.id)) {
             continue;
           }
           const range = this.live.rangeFor(document, annotation, spans);
@@ -813,8 +814,9 @@ export class ThreadView implements vscode.Disposable {
         if (this.store.relative(document.uri) === undefined) {
           continue;
         }
+        const detached = this.live.detachedIn(document);
         for (const annotation of this.store.forFile(document.uri)) {
-          if (annotation.orphaned === true) {
+          if (annotation.orphaned === true || detached.has(annotation.id)) {
             continue;
           }
           if (annotation.comments.length > 0 || this.drafts.has(annotation.id)) {

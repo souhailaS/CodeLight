@@ -175,6 +175,19 @@ describe("the cards the file view posts", () => {
   });
 });
 
+describe("a note the file view cannot place", () => {
+  it("labels it rather than pointing at a line that means nothing", async () => {
+    const { fake } = await mount(
+      [annotation({ anchor: { text: "const hello", before: "", after: " = 1;" } })],
+      "let nothing = here;\n"
+    );
+    const posted = latest(fake);
+    assert.equal(posted.cards.length, 1);
+    assert.equal(posted.cards[0].line, "not in this version");
+    assert.ok(posted.cards[0].html.includes("orphan"));
+  });
+});
+
 describe("what the file view says about git", () => {
   it("says nothing at all until git answers", async () => {
     answers = { "rev-parse": undefined };

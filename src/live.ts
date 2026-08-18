@@ -25,10 +25,6 @@ interface DocumentState {
   eol: vscode.EndOfLine;
 }
 
-function squash(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
 function sameRange(a: AnnotationRange, b: AnnotationRange): boolean {
   return (
     a.startLine === b.startLine &&
@@ -69,11 +65,16 @@ export class LiveRanges implements vscode.Disposable {
   }
 
   detachedIn(document: vscode.TextDocument): ReadonlySet<string> {
+    return this.placedIn(document).detached;
+  }
+
+  placedIn(document: vscode.TextDocument): { spans: SpanMap; detached: ReadonlySet<string> } {
     const relative = this.relativePath(document);
     if (!relative) {
-      return new Set();
+      return { spans: new Map(), detached: new Set() };
     }
-    return this.sync(document, this.store.forFile(document.uri)).detached;
+    const state = this.sync(document, this.store.forFile(document.uri));
+    return { spans: state.spans, detached: state.detached };
   }
 
   spansFor(document: vscode.TextDocument): SpanMap | undefined {
@@ -118,6 +119,9 @@ export class LiveRanges implements vscode.Disposable {
         if (recovered) {
           moved.set(annotation.id, this.toMove(document, text, recovered));
         }
+        continue;
+      }
+      if (state.detached.has(annotation.id)) {
         continue;
       }
       const span = state.spans.get(annotation.id);
@@ -227,8 +231,10 @@ export class LiveRanges implements vscode.Disposable {
     if (annotation.anchor.text.length < MAX_ANCHOR_TEXT) {
       return { start: found.start, end: found.end };
     }
-    const length = Math.max(found.end - found.start, stored.end - stored.start);
-    return { start: found.start, end: Math.min(text.length, found.start + length) };
+    const wanted = Math.max(found.end - found.start, stored.end - stored.start);
+    const room = text.indexOf(annotation.anchor.after, found.end);
+    const limit = room < 0 || annotation.anchor.after === "" ? text.length : room;
+    return { start: found.start, end: Math.min(limit, found.start + wanted) };
   }
 
   private forget(document: vscode.TextDocument): void {
@@ -320,9 +326,7 @@ export class LiveRanges implements vscode.Disposable {
     if (found) {
       return { span: this.expand(text, annotation, found, span), detached: false };
     }
-    const loose = squash(annotation.anchor.text);
-    const here = squash(text.slice(span.start, span.end));
-    return { span, detached: loose !== here };
+    return { span, detached: true };
   }
 
   private refreshPlacements(document: vscode.TextDocument, state: DocumentState): void {

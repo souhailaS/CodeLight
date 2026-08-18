@@ -227,6 +227,26 @@ describe("a file that changed underneath, as a branch switch leaves it", () => {
     assert.equal(live.detachedIn(switched).has("one"), false);
   });
 
+  it("does not re-anchor a note it could not place when the file is saved", async () => {
+    const { store, live } = await open();
+    assert.ok(await store.add(highlight("one", SOURCE, MARKED)));
+    const before = store.byId("one");
+    assert.ok(before);
+    const switched = new TextDocument(
+      Uri.file(nodePath.join(root, "src/a.ts")),
+      ["export function total(cart) {", "  return applyTax(cart.subtotal);", "}", ""].join("\n")
+    );
+    workspace.textDocuments = [switched];
+    assert.ok(live.detachedIn(switched).has("one"));
+    switched.replace(0, 0, "// a note\n");
+    await live.flushDocument(switched);
+    const after = store.byId("one");
+    assert.ok(after);
+    assert.equal(after.anchor.text, before.anchor.text);
+    assert.deepEqual(after.range, before.range);
+    assert.equal(after.orphaned, undefined);
+  });
+
   it("says nothing about a file no folder holds", async () => {
     const { live } = await open();
     const outside = new TextDocument(Uri.file("/elsewhere/a.ts"), SOURCE);

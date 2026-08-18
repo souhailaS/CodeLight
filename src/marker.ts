@@ -104,12 +104,17 @@ export class MarkerMode implements vscode.Disposable {
     ranges: readonly vscode.Range[],
     color: PaletteColor
   ): Promise<boolean> {
-    const spans = this.live.spansFor(editor.document);
+    const placed = this.live.placedIn(editor.document);
+    const spans = placed.spans;
     const matches: string[] = [];
     for (const range of ranges) {
       const me = this.identity.identity?.id;
       const hit = this.store.forFile(editor.document.uri).find((annotation) => {
-        if (annotation.orphaned === true || annotation.comments.length > 0) {
+        if (
+          annotation.orphaned === true ||
+          annotation.comments.length > 0 ||
+          placed.detached.has(annotation.id)
+        ) {
           return false;
         }
         if (me === undefined || annotation.author.id !== me) {

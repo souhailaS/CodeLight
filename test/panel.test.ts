@@ -15,6 +15,7 @@ import {
   workspace
 } from "./fakevscode";
 import { LiveRanges } from "../src/live";
+import { TextDocument } from "./fakevscode";
 import { Annotation, Comment } from "../src/model";
 import { AnnotationTree, FileNode, Node, PanelCommands } from "../src/panel";
 import { AnnotationStore } from "../src/store";
@@ -58,7 +59,7 @@ async function panel(): Promise<{
   const store = new AnnotationStore();
   await store.initialize();
   const live = new LiveRanges(store);
-  const tree = new AnnotationTree(store);
+  const tree = new AnnotationTree(store, live);
   const commands = new PanelCommands(store, live, tree);
   closing.push(tree, live, store);
   return { store, tree, commands };
@@ -164,6 +165,20 @@ describe("the annotation tree", () => {
     assert.equal(row.contextValue, "codelight.orphan");
     assert.equal(row.collapsibleState, TreeItemCollapsibleState.Collapsed);
     assert.equal((row.iconPath as ThemeIcon).id, "circle-slash");
+  });
+
+  it("says when a row cannot be placed in this version of the file", async () => {
+    const { store, tree } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.anchor = { text: "const total", before: "", after: " = one;" };
+    assert.ok(await store.add(entry));
+    const changed = new TextDocument(
+      Uri.file(nodePath.join(root, "src/a.ts")),
+      "let nothing = here;\n"
+    );
+    workspace.textDocuments = [changed];
+    const row = tree.getTreeItem(tree.getChildren(files(tree)[0])[0]);
+    assert.ok(String(row.description).includes("not in this version"), String(row.description));
   });
 
   it("keeps only one colour while a filter is on", async () => {

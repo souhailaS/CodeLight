@@ -411,7 +411,8 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       .forFile(document.uri)
       .filter((annotation) => annotation.comments.length > 0);
     const spans = annotations.length > 0 ? this.spansFor(document) : undefined;
-    const detached = annotations.length > 0 ? this.live.detachedIn(document) : new Set<string>();
+    const detached =
+      annotations.length > 0 ? this.live.detachedIn(document) : new Set<string>();
     const cards = annotations
       .map((annotation) => ({
         annotation,
