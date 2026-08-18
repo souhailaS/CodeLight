@@ -339,7 +339,7 @@ describe("converting between the formats", () => {
     assert.ok(errors().some((entry) => entry.includes(gzPath)));
   });
 
-  it("refuses a store that is over the size limit", async () => {
+  it("refuses a source it cannot read past the size limit", async () => {
     const store = await open("json");
     assert.ok(await store.add(annotation("one")));
     fs.writeFileSync(jsonPath, JSON.stringify({ version: 1, annotations: [bulky("big")] }));
@@ -620,6 +620,25 @@ describe("a store it cannot read", () => {
       written.annotations.map((entry) => entry.id),
       ["one", "two", "junk"]
     );
+  });
+
+  it("refuses to save a plain store past the size limit", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(annotation("one")));
+    messages.length = 0;
+    assert.equal(await store.add(bulky("big")), false);
+    assert.ok(errors().some((entry) => entry.includes(jsonPath) && entry.includes("MB limit")));
+    assert.deepEqual(ids(store), ["one"]);
+  });
+
+  it("empties the annotations when a change it cannot apply finds the file gone", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(annotation("one")));
+    fs.rmSync(jsonPath);
+    assert.equal(await store.remove("missing"), false);
+    await settle(() => ids(store).length === 0);
+    assert.deepEqual(ids(store), []);
+    assert.equal(store.location, undefined);
   });
 
   it("catches up when a change it cannot apply finds a newer file", async () => {

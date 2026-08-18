@@ -109,7 +109,9 @@ function tooLarge(content: string): boolean {
 
 async function encodeStore(content: string, target: vscode.Uri): Promise<Buffer> {
   if (tooLarge(content)) {
-    throw new Error(`The store is larger than the ${LIMIT_MB} MB limit.`);
+    throw new Error(
+      `The store is larger than the ${LIMIT_MB} MB limit. Remove some annotations before saving again.`
+    );
   }
   const buffer = Buffer.from(content, "utf8");
   return isCompressed(target) ? compress(buffer) : buffer;
@@ -287,12 +289,6 @@ export class AnnotationStore implements vscode.Disposable {
       if (taken) {
         void vscode.window.showWarningMessage(
           `CodeLight left ${source.fsPath} alone because ${destination.fsPath} already exists.`
-        );
-        return false;
-      }
-      if (tooLarge(disk.raw)) {
-        this.reportFailure(
-          `CodeLight could not convert ${source.fsPath}. The store is larger than the ${LIMIT_MB} MB limit.`
         );
         return false;
       }
@@ -746,8 +742,10 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.generation += 1;
     if (this.reloadTimer) {
       clearTimeout(this.reloadTimer);
+      this.reloadTimer = undefined;
     }
     this.watcher?.dispose();
     this.emitter.dispose();
