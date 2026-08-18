@@ -244,13 +244,13 @@
     "keybindings": [
       {
         "command": "codelight.addHighlight",
-        "key": "ctrl+k ctrl+h",
+        "key": "ctrl+k ctrl+y",
         "mac": "cmd+alt+k",
         "when": "editorTextFocus"
       },
       {
         "command": "codelight.addComment",
-        "key": "ctrl+k ctrl+m",
+        "key": "ctrl+k ctrl+;",
         "mac": "cmd+alt+m",
         "when": "editorTextFocus"
       }
@@ -394,6 +394,16 @@
           "command": "codelight.deleteFileHighlights",
           "when": "view == codelight.annotations && viewItem == codelight.file",
           "group": "inline@1"
+        },
+        {
+          "command": "codelight.editComment",
+          "when": "view == codelight.annotations && viewItem == codelight.comment",
+          "group": "inline@1"
+        },
+        {
+          "command": "codelight.deleteComment",
+          "when": "view == codelight.annotations && viewItem == codelight.comment",
+          "group": "inline@2"
         }
       ],
       "comments/commentThread/context": [

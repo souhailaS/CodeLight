@@ -39,8 +39,8 @@ Highlights follow your edits. Insert lines above one and it moves with the text.
 
 | Action | Shortcut |
 | --- | --- |
-| Highlight the selection | `cmd alt K` on macOS, `ctrl K ctrl H` elsewhere |
-| Comment on the selection | `cmd alt M` on macOS, `ctrl K ctrl M` elsewhere |
+| Highlight the selection | `cmd alt K` on macOS, `ctrl K ctrl Y` elsewhere |
+| Comment on the selection | `cmd alt M` on macOS, `ctrl K ctrl ;` elsewhere |
 
 Everything else lives in the command palette under **CodeLight**, in the editor right click menu, and in the panel behind the CodeLight icon in the activity bar.
 

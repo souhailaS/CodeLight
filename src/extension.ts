@@ -33,8 +33,9 @@ export function activate(context: vscode.ExtensionContext): void {
     showCollapseAll: true
   });
   const fileComments = new FileCommentsView(store, live);
-  const ready = Promise.all([identity.refresh(), store.initialize()]).catch(() => undefined);
+  const ready = store.initialize().catch(() => undefined);
   void ready.then(() => fileComments.ready());
+  void identity.refresh().catch(() => undefined);
 
   context.subscriptions.push(
     identity,

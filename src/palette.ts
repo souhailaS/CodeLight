@@ -40,7 +40,8 @@ function parseColor(value: unknown): PaletteColor | undefined {
   if (id === "" || !HEX.test(hex)) {
     return undefined;
   }
-  const label = typeof value.label === "string" && value.label.trim() !== "" ? value.label.trim() : id;
+  const raw = typeof value.label === "string" ? value.label.replace(/\$\(/g, "(").trim() : "";
+  const label = raw === "" ? id : raw;
   return { id, label, hex };
 }
 
