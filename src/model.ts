@@ -182,6 +182,9 @@ export function parseStore(raw: string): ParsedStore {
   if (!isRecord(parsed)) {
     throw new Error("The file must contain an object.");
   }
+  if (parsed.version !== undefined && typeof parsed.version !== "number") {
+    throw new Error("The file has a version that is not a number, so it was not written by CodeLight.");
+  }
   if (typeof parsed.version === "number" && parsed.version > STORE_VERSION) {
     throw new Error(
       `The file uses format version ${parsed.version}, this build understands ${STORE_VERSION}. Update the extension.`

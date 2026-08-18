@@ -339,7 +339,7 @@ describe("converting between the formats", () => {
     assert.ok(errors().some((entry) => entry.includes(gzPath)));
   });
 
-  it("refuses a store that is too large to compress", async () => {
+  it("refuses a store that is over the size limit", async () => {
     const store = await open("json");
     assert.ok(await store.add(annotation("one")));
     fs.writeFileSync(jsonPath, JSON.stringify({ version: 1, annotations: [bulky("big")] }));
@@ -348,7 +348,7 @@ describe("converting between the formats", () => {
     assert.equal(await store.convertStorage(), false);
     assert.ok(fs.existsSync(jsonPath));
     assert.ok(!fs.existsSync(gzPath));
-    assert.ok(errors().some((entry) => entry.includes("too large to compress") && entry.includes(jsonPath)));
+    assert.ok(errors().some((entry) => entry.includes("MB limit") && entry.includes(jsonPath)));
   });
 
   it("refuses while it cannot check both files", async () => {
@@ -562,6 +562,27 @@ describe("a store it cannot read", () => {
     assert.ok(fs.existsSync(gzPath));
   });
 
+  it("refuses a plain file past the limit", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(annotation("one")));
+    fs.writeFileSync(jsonPath, Buffer.alloc(LIMIT + 1024, 32));
+    messages.length = 0;
+    await store.refresh();
+    assert.deepEqual(ids(store), ["one"]);
+    assert.ok(errors().some((entry) => entry.includes(jsonPath) && entry.includes("MB limit")));
+    assert.ok(fs.existsSync(jsonPath));
+  });
+
+  it("refuses a version that is not a number", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(annotation("one")));
+    fs.writeFileSync(jsonPath, JSON.stringify({ version: "1", annotations: [] }));
+    messages.length = 0;
+    await store.refresh();
+    assert.deepEqual(ids(store), ["one"]);
+    assert.ok(errors().some((entry) => entry.includes("not a number")));
+  });
+
   it("refuses a file from a newer build", async () => {
     const store = await open("json");
     assert.ok(await store.add(annotation("one")));
@@ -599,6 +620,15 @@ describe("a store it cannot read", () => {
       written.annotations.map((entry) => entry.id),
       ["one", "two", "junk"]
     );
+  });
+
+  it("catches up when a change it cannot apply finds a newer file", async () => {
+    const store = await open("json");
+    assert.ok(await store.add(annotation("one")));
+    fs.writeFileSync(jsonPath, JSON.stringify({ version: 1, annotations: [annotation("two")] }));
+    assert.equal(await store.remove("missing"), false);
+    await settle(() => ids(store).length === 1 && ids(store)[0] === "two");
+    assert.deepEqual(ids(store), ["two"]);
   });
 
   it("empties the annotations when the file disappears", async () => {
