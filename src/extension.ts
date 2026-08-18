@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { CommentCommands } from "./comments";
 import { HighlightRenderer } from "./decorations";
 import { FileCommentsView } from "./fileview";
+import { keepPrivate, stopKeepingPrivate } from "./gitignore";
 import { HighlightCommands, useSwatches } from "./highlights";
 import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
@@ -197,6 +198,24 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("codelight.deleteComment", async (target?: unknown) => {
       await ready;
       await comments.remove(nodeId(target));
+    }),
+    vscode.commands.registerCommand("codelight.keepPrivate", async () => {
+      await ready;
+      const root = store.rootUri;
+      if (!root) {
+        void vscode.window.showWarningMessage("CodeLight needs an open folder.");
+        return;
+      }
+      await keepPrivate(root);
+    }),
+    vscode.commands.registerCommand("codelight.shareInGit", async () => {
+      await ready;
+      const root = store.rootUri;
+      if (!root) {
+        void vscode.window.showWarningMessage("CodeLight needs an open folder.");
+        return;
+      }
+      await stopKeepingPrivate(root);
     }),
     vscode.commands.registerCommand("codelight.convertStorage", async () => {
       await ready;

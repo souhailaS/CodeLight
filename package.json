@@ -134,6 +134,16 @@
         "icon": "$(filter-filled)"
       },
       {
+        "command": "codelight.keepPrivate",
+        "title": "Keep the Notes Out of Git",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.shareInGit",
+        "title": "Let the Notes Go Into Git",
+        "category": "CodeLight"
+      },
+      {
         "command": "codelight.convertStorage",
         "title": "Convert Annotation Storage Format",
         "category": "CodeLight"
