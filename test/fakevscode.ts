@@ -25,6 +25,9 @@ export class Uri {
   static file(value: string): Uri {
     return new Uri(value);
   }
+  static parse(value: string): Uri {
+    return new Uri(value);
+  }
   static joinPath(base: Uri, ...segments: string[]): Uri {
     return new Uri(nodePath.resolve(base.path, ...segments));
   }
@@ -87,6 +90,76 @@ export class EventEmitter<T> {
   }
 }
 
+export class Position {
+  constructor(
+    public line: number,
+    public character: number
+  ) {}
+  isEqual(other: Position): boolean {
+    return this.line === other.line && this.character === other.character;
+  }
+  isBefore(other: Position): boolean {
+    return this.line < other.line || (this.line === other.line && this.character < other.character);
+  }
+  isBeforeOrEqual(other: Position): boolean {
+    return this.isBefore(other) || this.isEqual(other);
+  }
+  isAfter(other: Position): boolean {
+    return other.isBefore(this);
+  }
+  isAfterOrEqual(other: Position): boolean {
+    return this.isAfter(other) || this.isEqual(other);
+  }
+}
+
+export class Range {
+  readonly start: Position;
+  readonly end: Position;
+  constructor(
+    startLine: number | Position,
+    startCharacter: number | Position,
+    endLine?: number,
+    endCharacter?: number
+  ) {
+    if (startLine instanceof Position && startCharacter instanceof Position) {
+      this.start = startLine;
+      this.end = startCharacter;
+      return;
+    }
+    this.start = new Position(startLine as number, startCharacter as number);
+    this.end = new Position(endLine ?? 0, endCharacter ?? 0);
+  }
+  get isEmpty(): boolean {
+    return this.start.isEqual(this.end);
+  }
+  get isSingleLine(): boolean {
+    return this.start.line === this.end.line;
+  }
+  isEqual(other: Range): boolean {
+    return this.start.isEqual(other.start) && this.end.isEqual(other.end);
+  }
+  contains(other: Position | Range): boolean {
+    const from = other instanceof Range ? other.start : other;
+    const to = other instanceof Range ? other.end : other;
+    return this.start.isBeforeOrEqual(from) && this.end.isAfterOrEqual(to);
+  }
+}
+
+export class MarkdownString {
+  value = "";
+  isTrusted = false;
+  supportHtml = false;
+  supportThemeIcons = false;
+  appendMarkdown(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+  appendText(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+}
+
 export class RelativePattern {
   constructor(
     public base: Uri,
@@ -145,6 +218,10 @@ export function setConfiguration(key: string, value: unknown): void {
   configuration.set(key, value);
 }
 
+export function setFolderConfiguration(root: Uri, key: string, value: unknown): void {
+  configuration.set(`${key}@${root.path}`, value);
+}
+
 export function queueAnswer(answer: string): void {
   answers.push(answer);
 }
@@ -190,10 +267,75 @@ export const window = {
   showTextDocument(document: unknown) {
     opened.push(document as { uri: Uri });
     return Promise.resolve(undefined);
+  },
+  visibleTextEditors: [] as Editor[],
+  onDidChangeVisibleTextEditors() {
+    return { dispose: () => undefined };
+  },
+  createTextEditorDecorationType(options: unknown) {
+    const type: Decoration = {
+      options,
+      disposed: false,
+      dispose(): void {
+        type.disposed = true;
+      }
+    };
+    decorations.push(type);
+    return type;
   }
 };
 
+export interface Editor {
+  document: unknown;
+  applied: Map<Decoration, unknown[]>;
+  setDecorations(type: Decoration, ranges: unknown[]): void;
+}
+
+export function editorFor(document: unknown): Editor {
+  const editor: Editor = {
+    document,
+    applied: new Map(),
+    setDecorations(type: Decoration, ranges: unknown[]): void {
+      editor.applied.set(type, ranges);
+    }
+  };
+  return editor;
+}
+
+export interface Decoration {
+  options: unknown;
+  disposed: boolean;
+  dispose(): void;
+}
+
+export const decorations: Decoration[] = [];
+
+export class ThemeColor {
+  constructor(public id: string) {}
+}
+
+export enum DecorationRangeBehavior {
+  OpenOpen = 0,
+  ClosedClosed = 1
+}
+
+export enum OverviewRulerLane {
+  Left = 1,
+  Center = 2,
+  Right = 4,
+  Full = 7
+}
+
 export const opened: Array<{ uri: Uri }> = [];
+
+export const commands = {
+  executeCommand(...rest: unknown[]) {
+    invoked.push(rest);
+    return Promise.resolve(undefined);
+  }
+};
+
+export const invoked: unknown[][] = [];
 
 export interface Watcher {
   pattern: unknown;
@@ -293,15 +435,53 @@ export const workspace = {
       }
     }
   },
-  getConfiguration(section: string) {
+  getConfiguration(section: string, resource?: Uri | null) {
     return {
       get<T>(key: string): T | undefined {
-        return configuration.get(`${section}.${key}`) as T | undefined;
+        const prefix = `${section}.${key}@`;
+        let best: unknown;
+        let longest = -1;
+        if (resource) {
+          for (const [stored, value] of configuration) {
+            if (!stored.startsWith(prefix)) {
+              continue;
+            }
+            const folder = stored.slice(prefix.length);
+            const inside = resource.path === folder || resource.path.startsWith(`${folder}/`);
+            if (inside && folder.length > longest) {
+              best = value;
+              longest = folder.length;
+            }
+          }
+        }
+        return (longest >= 0 ? best : configuration.get(`${section}.${key}`)) as T | undefined;
       }
     };
   },
+  onDidChangeConfiguration() {
+    return { dispose: () => undefined };
+  },
+  onDidOpenTextDocument() {
+    return { dispose: () => undefined };
+  },
+  onDidChangeTextDocument() {
+    return { dispose: () => undefined };
+  },
+  onDidSaveTextDocument() {
+    return { dispose: () => undefined };
+  },
+  onDidCloseTextDocument() {
+    return { dispose: () => undefined };
+  },
   getWorkspaceFolder(target: Uri): { uri: Uri; name: string; index: number } | undefined {
-    return workspace.workspaceFolders.find((folder) => target.path.startsWith(folder.uri.path));
+    let best: { uri: Uri; name: string; index: number } | undefined;
+    for (const folder of workspace.workspaceFolders) {
+      const inside = target.path === folder.uri.path || target.path.startsWith(`${folder.uri.path}/`);
+      if (inside && (!best || folder.uri.path.length > best.uri.path.length)) {
+        best = folder;
+      }
+    }
+    return best;
   },
   createFileSystemWatcher(pattern?: unknown) {
     const watcher: Watcher = {
@@ -338,5 +518,8 @@ export function resetFake(): void {
   workspace.textDocuments = [];
   watchers.length = 0;
   window.activeTextEditor = undefined;
+  window.visibleTextEditors = [];
   opened.length = 0;
+  decorations.length = 0;
+  invoked.length = 0;
 }

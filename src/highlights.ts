@@ -110,7 +110,8 @@ export class HighlightCommands {
     if (!author) {
       return [];
     }
-    const color = preset ?? (await pickColor(this.renderer.colors, "CodeLight"));
+    const color =
+      preset ?? (await pickColor(this.renderer.colorsFor(editor.document.uri), "CodeLight"));
     if (!color) {
       return [];
     }
@@ -406,7 +407,10 @@ export class HighlightCommands {
       );
       return;
     }
-    const color = await pickColor(this.renderer.colors, "Change highlight color");
+    const color = await pickColor(
+      this.renderer.colorsFor(this.store.uriFor(annotation)),
+      "Change highlight color"
+    );
     if (!color) {
       return;
     }

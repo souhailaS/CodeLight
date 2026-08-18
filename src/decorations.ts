@@ -14,15 +14,20 @@ import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 import { InlineMode, inlineLabel, threadMarkdown } from "./thread";
 
+interface Style {
+  palette: PaletteColor[];
+  inline: InlineMode;
+  released: boolean;
+  types: Map<string, vscode.TextEditorDecorationType>;
+  gutters: Map<string, vscode.TextEditorDecorationType>;
+}
+
 export class HighlightRenderer implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
-  private types = new Map<string, vscode.TextEditorDecorationType>();
-  private palette: PaletteColor[] = [];
-  private paletteRoot: string | undefined;
+  private styles = new Map<string, Style>();
+  private painted = new WeakMap<vscode.TextEditor, Style>();
   private badge: vscode.TextEditorDecorationType | undefined;
-  private gutters = new Map<string, vscode.TextEditorDecorationType>();
   private hovers = new Map<string, vscode.MarkdownString>();
-  private inline: InlineMode = "preview";
 
   constructor(
     private readonly store: AnnotationStore,
@@ -33,9 +38,7 @@ export class HighlightRenderer implements vscode.Disposable {
     this.disposables.push(
       store.onDidChange(() => {
         this.hovers = new Map();
-        if (this.paletteRoot !== this.store.rootUri?.toString()) {
-          this.rebuild();
-        }
+        this.prune();
         this.renderAll();
       }),
       live.onDidShift((document) => this.renderDocument(document)),
@@ -56,8 +59,8 @@ export class HighlightRenderer implements vscode.Disposable {
     this.renderAll();
   }
 
-  get colors(): readonly PaletteColor[] {
-    return this.palette;
+  colorsFor(target: vscode.Uri | undefined): readonly PaletteColor[] {
+    return this.styleFor(target ? this.store.rootFor(target) : undefined).palette;
   }
 
   renderAll(): void {
@@ -67,24 +70,25 @@ export class HighlightRenderer implements vscode.Disposable {
   }
 
   render(editor: vscode.TextEditor): void {
+    const style = this.styleFor(this.store.rootFor(editor.document.uri));
     const annotations = this.visibility.visible ? this.store.forFile(editor.document.uri) : [];
     const spans = annotations.length > 0 ? this.live.spansFor(editor.document) : undefined;
     const grouped = new Map<string, vscode.DecorationOptions[]>();
-    for (const key of this.types.keys()) {
+    for (const key of style.types.keys()) {
       grouped.set(key, []);
     }
     const labels = new Map<number, string[]>();
     const marks = new Map<string, vscode.Range[]>();
-    for (const key of this.types.keys()) {
+    for (const key of style.types.keys()) {
       marks.set(key, []);
     }
     for (const annotation of annotations) {
       if (annotation.orphaned === true) {
         continue;
       }
-      const key = this.types.has(annotation.color)
+      const key = style.types.has(annotation.color)
         ? annotation.color
-        : resolveColor(this.palette, annotation.color).id;
+        : resolveColor(style.palette, annotation.color).id;
       const options = grouped.get(key);
       if (!options) {
         continue;
@@ -99,7 +103,7 @@ export class HighlightRenderer implements vscode.Disposable {
             : range.end.line;
         gutter.push(new vscode.Range(range.start.line, 0, last, 0));
       }
-      const label = range.isEmpty ? undefined : inlineLabel(annotation, this.inline);
+      const label = range.isEmpty ? undefined : inlineLabel(annotation, style.inline);
       if (label !== undefined) {
         const anchorLine =
           range.end.character === 0 && range.end.line > range.start.line
@@ -110,14 +114,24 @@ export class HighlightRenderer implements vscode.Disposable {
         labels.set(anchorLine, line);
       }
     }
+    const previous = this.painted.get(editor);
+    if (previous && previous !== style && !previous.released) {
+      for (const type of previous.types.values()) {
+        editor.setDecorations(type, []);
+      }
+      for (const type of previous.gutters.values()) {
+        editor.setDecorations(type, []);
+      }
+    }
+    this.painted.set(editor, style);
     for (const [key, options] of grouped) {
-      const type = this.types.get(key);
+      const type = style.types.get(key);
       if (type) {
         editor.setDecorations(type, options);
       }
     }
     for (const [key, ranges] of marks) {
-      const type = this.gutters.get(key);
+      const type = style.gutters.get(key);
       if (type) {
         editor.setDecorations(type, ranges);
       }
@@ -154,32 +168,24 @@ export class HighlightRenderer implements vscode.Disposable {
     }
   }
 
-  private rebuild(): void {
-    for (const type of this.types.values()) {
-      type.dispose();
+  private styleFor(resource: vscode.Uri | undefined): Style {
+    const key = resource?.toString() ?? "";
+    const known = this.styles.get(key);
+    if (known) {
+      return known;
     }
-    for (const type of this.gutters.values()) {
-      type.dispose();
-    }
-    this.types = new Map();
-    this.gutters = new Map();
-    const resource = this.store.rootUri;
-    this.paletteRoot = resource?.toString();
-    this.palette = readPalette(resource);
+    const palette = readPalette(resource);
     const opacity = readOpacity(resource);
-    this.inline = readInlineMode(resource);
     const marks = readGutterMarks(resource);
-    this.badge?.dispose();
-    this.badge = vscode.window.createTextEditorDecorationType({
-      after: {
-        color: new vscode.ThemeColor("editorCodeLens.foreground"),
-        fontStyle: "italic",
-        margin: "0 0 0 1rem"
-      },
-      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
-    });
-    for (const color of this.palette) {
-      this.types.set(
+    const style: Style = {
+      palette,
+      inline: readInlineMode(resource),
+      released: false,
+      types: new Map(),
+      gutters: new Map()
+    };
+    for (const color of palette) {
+      style.types.set(
         color.id,
         vscode.window.createTextEditorDecorationType({
           backgroundColor: toRgba(color.hex, opacity),
@@ -191,7 +197,7 @@ export class HighlightRenderer implements vscode.Disposable {
         })
       );
       if (marks) {
-        this.gutters.set(
+        style.gutters.set(
           color.id,
           vscode.window.createTextEditorDecorationType({
             gutterIconPath: this.gutterIcon(color.hex),
@@ -200,6 +206,47 @@ export class HighlightRenderer implements vscode.Disposable {
         );
       }
     }
+    this.styles.set(key, style);
+    return style;
+  }
+
+  private release(style: Style): void {
+    style.released = true;
+    for (const type of style.types.values()) {
+      type.dispose();
+    }
+    for (const type of style.gutters.values()) {
+      type.dispose();
+    }
+  }
+
+  private prune(): void {
+    const known = new Set(this.store.folders.map((folder) => folder.key));
+    for (const [key, style] of [...this.styles]) {
+      if (key === "" || known.has(key)) {
+        continue;
+      }
+      this.release(style);
+      this.styles.delete(key);
+    }
+  }
+
+  private rebuild(): void {
+    for (const style of this.styles.values()) {
+      this.release(style);
+    }
+    this.styles = new Map();
+    if (this.badge) {
+      return;
+    }
+    this.badge = vscode.window.createTextEditorDecorationType({
+      after: {
+        color: new vscode.ThemeColor("editorCodeLens.foreground"),
+        fontStyle: "italic",
+        margin: "0 0 0 1rem"
+      },
+      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
+    });
   }
 
   private gutterIcon(hex: string): vscode.Uri {
@@ -208,14 +255,10 @@ export class HighlightRenderer implements vscode.Disposable {
   }
 
   dispose(): void {
-    for (const type of this.types.values()) {
-      type.dispose();
+    for (const style of this.styles.values()) {
+      this.release(style);
     }
-    for (const type of this.gutters.values()) {
-      type.dispose();
-    }
-    this.types = new Map();
-    this.gutters = new Map();
+    this.styles = new Map();
     this.badge?.dispose();
     this.badge = undefined;
     for (const disposable of this.disposables) {
