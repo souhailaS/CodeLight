@@ -66,7 +66,7 @@ describe("keeping the notes out of git", () => {
     fs.writeFileSync(ignorePath, before);
     await keepPrivate(Uri.file(root));
     assert.equal(text(), before);
-    assert.ok(infos().some((entry) => entry.includes("already keeps")));
+    assert.ok(infos().some((entry) => entry.includes("already out of git")));
   });
 
   it("adds only the entry that is missing", async () => {
@@ -88,7 +88,7 @@ describe("keeping the notes out of git", () => {
   it("sees an entry that a mixed ending file already holds", async () => {
     fs.writeFileSync(ignorePath, "node_modules\r\ndist\n.vscode/codelight.json\n.vscode/codelight.json.gz\n");
     await keepPrivate(Uri.file(root));
-    assert.ok(infos().some((entry) => entry.includes("already keeps")));
+    assert.ok(infos().some((entry) => entry.includes("already out of git")));
   });
 
   it("adds the entry again below a negation that undid it", async () => {
@@ -158,12 +158,12 @@ describe("letting the notes back into git", () => {
     fs.writeFileSync(ignorePath, "node_modules\n");
     await stopKeepingPrivate(Uri.file(root));
     assert.equal(text(), "node_modules\n");
-    assert.ok(infos().some((entry) => entry.includes("does not ignore")));
+    assert.ok(infos().some((entry) => entry.includes("already go into git")));
   });
 
   it("says so when the folder has no gitignore at all", async () => {
     await stopKeepingPrivate(Uri.file(root));
     assert.equal(fs.existsSync(ignorePath), false);
-    assert.ok(infos().some((entry) => entry.includes("does not ignore")));
+    assert.ok(infos().some((entry) => entry.includes("already go into git")));
   });
 });
