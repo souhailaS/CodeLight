@@ -8,6 +8,7 @@ import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
 import { MarkerMode } from "./marker";
+import { SharingState } from "./sharing";
 import { FileStatus } from "./statusbar";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
@@ -23,7 +24,8 @@ export function activate(context: vscode.ExtensionContext): void {
   useSwatches(new Swatches(context.globalStorageUri));
   const highlights = new HighlightCommands(store, identity, renderer, live, visibility);
   const marker = new MarkerMode(identity, store, renderer, highlights, live, visibility);
-  const status = new FileStatus(store, visibility);
+  const sharing = new SharingState();
+  const status = new FileStatus(store, visibility, sharing);
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity, visibility);
   const tree = new AnnotationTree(store);
@@ -32,7 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: tree,
     showCollapseAll: true
   });
-  const fileComments = new FileCommentsView(store, live);
+  const fileComments = new FileCommentsView(store, live, sharing);
   const ready = store.initialize().catch(() => undefined);
   void ready.then(() => fileComments.ready());
   void identity.refresh().catch(() => undefined);

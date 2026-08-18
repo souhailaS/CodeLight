@@ -5,11 +5,13 @@ import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { EventEmitter, invoked, resetFake, TextDocument, Uri, window, workspace } from "./fakevscode";
 import { FileCommentsView } from "../src/fileview";
+import { SharingState } from "../src/sharing";
 import { LiveRanges } from "../src/live";
 import { AnnotationStore } from "../src/store";
 
 let root = "";
 let closing: Array<{ dispose(): void }> = [];
+let answers: Record<string, number | undefined> = { "rev-parse": 128 };
 
 interface Posted {
   type: string;
@@ -102,7 +104,10 @@ async function mount(
   const store = new AnnotationStore();
   await store.initialize();
   const live = new LiveRanges(store);
-  const view = new FileCommentsView(store, live);
+  const shares = new SharingState((args) =>
+    Promise.resolve(args[0] in answers ? answers[args[0]] : 1)
+  );
+  const view = new FileCommentsView(store, live, shares);
   closing.push(store, live, view);
   const document = new TextDocument(Uri.file(nodePath.join(root, "a.ts")), body);
   workspace.textDocuments = [document];
@@ -124,6 +129,7 @@ function latest(fake: ReturnType<typeof fakeView>): Posted {
 beforeEach(() => {
   resetFake();
   closing = [];
+  answers = { "rev-parse": 128 };
   root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-fileview-"));
   workspace.workspaceFolders = [{ uri: Uri.file(root), name: "repo", index: 0 }];
 });
@@ -166,6 +172,42 @@ describe("the cards the file view posts", () => {
     assert.equal(posted.cards.length, 1);
     assert.ok(posted.cards[0].html.includes("orphan"));
     assert.equal(posted.cards[0].line, "text deleted");
+  });
+});
+
+describe("what the file view says about git", () => {
+  it("says nothing at all until git answers", async () => {
+    answers = { "rev-parse": undefined };
+    const { fake } = await mount([annotation()]);
+    assert.equal(latest(fake).head.includes("machine"), false);
+    assert.equal(latest(fake).head.includes("repository"), false);
+  });
+
+  it("says the notes stay here when git ignores them", async () => {
+    answers = { "rev-parse": 0, "check-ignore": 0 };
+    const { fake } = await mount([annotation()]);
+    for (let attempt = 0; attempt < 40 && !latest(fake).head.includes("machine"); attempt += 1) {
+      await new Promise((done) => setTimeout(done, 10));
+    }
+    assert.ok(latest(fake).head.includes("stay on this machine"), latest(fake).head);
+  });
+
+  it("says the notes travel once they are committed", async () => {
+    answers = { "rev-parse": 0, "check-ignore": 1, "ls-files": 0 };
+    const { fake } = await mount([annotation()]);
+    for (let attempt = 0; attempt < 40 && !latest(fake).head.includes("repository"); attempt += 1) {
+      await new Promise((done) => setTimeout(done, 10));
+    }
+    assert.ok(latest(fake).head.includes("travel with the repository"), latest(fake).head);
+  });
+
+  it("says nobody else has them while they are uncommitted", async () => {
+    answers = { "rev-parse": 0, "check-ignore": 1, "ls-files": 1 };
+    const { fake } = await mount([annotation()]);
+    for (let attempt = 0; attempt < 40 && !latest(fake).head.includes("committed"); attempt += 1) {
+      await new Promise((done) => setTimeout(done, 10));
+    }
+    assert.ok(latest(fake).head.includes("not committed"), latest(fake).head);
   });
 });
 

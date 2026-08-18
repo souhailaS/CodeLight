@@ -5,12 +5,18 @@ import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { resetFake, statusBars, TextDocument, Uri, window, workspace } from "./fakevscode";
 import { Annotation, Comment } from "../src/model";
+import { SharingState } from "../src/sharing";
 import { FileStatus } from "../src/statusbar";
 import { AnnotationStore } from "../src/store";
 import { Visibility } from "../src/visibility";
 
 let root = "";
 let closing: Array<{ dispose(): void }> = [];
+let answers: Record<string, number | undefined> = { "rev-parse": 128 };
+
+function sharing(): SharingState {
+  return new SharingState((args) => Promise.resolve(args[0] in answers ? answers[args[0]] : 1));
+}
 
 function comment(id: string): Comment {
   return {
@@ -48,8 +54,9 @@ async function bar(entries: Annotation[], open = true): Promise<{ text: string; 
   const document = new TextDocument(Uri.file(nodePath.join(root, "src/a.ts")), "const one = 1;\n");
   workspace.textDocuments = [document];
   (window as { activeTextEditor: unknown }).activeTextEditor = open ? { document } : undefined;
-  const status = new FileStatus(store, visibility);
+  const status = new FileStatus(store, visibility, sharing());
   closing.push(status, visibility, store);
+  await new Promise((done) => setTimeout(done, 10));
   const item = statusBars[statusBars.length - 1];
   return { text: item.text, tooltip: item.tooltip, visible: item.visible };
 }
@@ -57,6 +64,7 @@ async function bar(entries: Annotation[], open = true): Promise<{ text: string; 
 beforeEach(() => {
   resetFake();
   closing = [];
+  answers = { "rev-parse": 128 };
   root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-status-"));
   fs.mkdirSync(nodePath.join(root, ".vscode"));
   workspace.workspaceFolders = [{ uri: Uri.file(root), name: "root", index: 0 }];
@@ -112,6 +120,25 @@ describe("what the status bar counts", () => {
     assert.ok(shown.visible);
     assert.ok(shown.text.includes("0 highlights, 1"));
     assert.ok(shown.tooltip.includes("stranded"));
+  });
+
+  it("says where the notes live once git has answered", async () => {
+    answers = { "rev-parse": 0, "check-ignore": 0 };
+    const ignored = await bar([annotation("one", [])]);
+    assert.ok(ignored.tooltip.includes("stay on this machine"), ignored.tooltip);
+    answers = { "rev-parse": 0, "check-ignore": 1, "ls-files": 0 };
+    const tracked = await bar([annotation("two", [])]);
+    assert.ok(tracked.tooltip.includes("travel with the repository"), tracked.tooltip);
+    answers = { "rev-parse": 0, "check-ignore": 1, "ls-files": 1 };
+    const fresh = await bar([annotation("three", [])]);
+    assert.ok(fresh.tooltip.includes("not committed"), fresh.tooltip);
+  });
+
+  it("says nothing about git when it cannot tell", async () => {
+    answers = { "rev-parse": undefined };
+    const shown = await bar([annotation("one", [])]);
+    assert.equal(shown.tooltip.includes("repository"), false);
+    assert.equal(shown.tooltip.includes("machine"), false);
   });
 
   it("says the notes are hidden while they are", async () => {
