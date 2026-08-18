@@ -17,6 +17,7 @@ import { InlineMode, inlineLabel, threadMarkdown } from "./thread";
 interface Style {
   palette: PaletteColor[];
   inline: InlineMode;
+  released: boolean;
   types: Map<string, vscode.TextEditorDecorationType>;
   gutters: Map<string, vscode.TextEditorDecorationType>;
 }
@@ -24,6 +25,7 @@ interface Style {
 export class HighlightRenderer implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private styles = new Map<string, Style>();
+  private painted = new WeakMap<vscode.TextEditor, Style>();
   private badge: vscode.TextEditorDecorationType | undefined;
   private hovers = new Map<string, vscode.MarkdownString>();
 
@@ -112,17 +114,16 @@ export class HighlightRenderer implements vscode.Disposable {
         labels.set(anchorLine, line);
       }
     }
-    for (const other of this.styles.values()) {
-      if (other === style) {
-        continue;
-      }
-      for (const type of other.types.values()) {
+    const previous = this.painted.get(editor);
+    if (previous && previous !== style && !previous.released) {
+      for (const type of previous.types.values()) {
         editor.setDecorations(type, []);
       }
-      for (const type of other.gutters.values()) {
+      for (const type of previous.gutters.values()) {
         editor.setDecorations(type, []);
       }
     }
+    this.painted.set(editor, style);
     for (const [key, options] of grouped) {
       const type = style.types.get(key);
       if (type) {
@@ -179,6 +180,7 @@ export class HighlightRenderer implements vscode.Disposable {
     const style: Style = {
       palette,
       inline: readInlineMode(resource),
+      released: false,
       types: new Map(),
       gutters: new Map()
     };
@@ -209,6 +211,7 @@ export class HighlightRenderer implements vscode.Disposable {
   }
 
   private release(style: Style): void {
+    style.released = true;
     for (const type of style.types.values()) {
       type.dispose();
     }
