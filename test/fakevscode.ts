@@ -858,6 +858,9 @@ export function resetFake(): void {
   decorations.length = 0;
   invoked.length = 0;
   statusBars.length = 0;
+  controllers.length = 0;
+  clipboard.text = "";
+  clipboard.failWrite = false;
   picks.length = 0;
   chosen.length = 0;
   authentication.session = undefined;
