@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+Fixes for bugs found by reading the extension the way a stranger would, each one reproduced with a test before it was fixed.
+
+* Comment on Selection stopped working for the rest of a file once any draft note was left open, because a check meant to reuse an overlapping draft matched every draft instead. It reuses only a draft that really overlaps now.
+* A comment placed on the last line of a file that ends with a newline was saved with nothing to hold on to. It could never be replied to, and the next save turned it into an orphan and took it off the screen. CodeLight refuses that line now, keeps your text on the clipboard, and no longer offers the gutter button there.
+* A comment you were part way through editing was only rescued to the clipboard when the whole highlight vanished. Hiding the notes, losing the text a highlight marked, or a colleague deleting the last comment all dropped what you had typed. Every one of them rescues it now.
+* The same rescue now covers the command palette edit, which lost your rewrite whenever the save failed.
+* The marker deleted a highlight you had finished with if you clicked away while the previous one was still being written to disk. It keeps track of that now.
+* The marker recoloured into the wrong folder's file in a workspace with a folder inside another folder, and told you it could not save. It writes to the folder that owns the highlight, in one write per folder.
+* The marker checks that the colour it is holding still exists in the palette of the file you are marking, and stops with an explanation rather than writing a colour that folder cannot render.
+* The marker no longer warns on every selection that lands on a highlight it is not allowed to repaint, such as a colleague's.
+* **ctrl K ctrl H** and **ctrl K ctrl M** were taking over VS Code's own Toggle Output and Toggle Maximize Editor Group on Windows and Linux. The shortcuts are **ctrl K ctrl Y** and **ctrl K ctrl G** now, both free on every platform and reachable on every keyboard layout. The macOS shortcuts are unchanged.
+* Nothing waits for GitHub sign in any more except the act of writing a note, so the panel and the commands are ready as soon as the annotation file is read.
+* The status bar counts the comments on stranded highlights too, and says how many are stranded, so it agrees with the panel beside it.
+* Right clicking a comment in the panel offers Edit and Delete, which the tree claimed to support but no menu reached.
+
 ## 0.5.2
 
 * The two git commands now replace `.gitignore` the way CodeLight replaces its own store, through a temporary file renamed over the old one. An interrupted save leaves the file exactly as it was rather than truncated, the permissions of the file are kept, a new file follows your umask, and CodeLight says so on the rare occasion it has to write in place instead.
