@@ -445,6 +445,36 @@ describe("what the marker does under pressure", () => {
   });
 });
 
+describe("two marks that could overlap", () => {
+  it("runs one mark at a time while a recolour is still writing", async () => {
+    const { store, marker, editor, document } = await rig();
+    assert.ok(
+      await store.add({
+        id: "seeded",
+        file: "src/a.ts",
+        range: { startLine: 0, startCharacter: 6, endLine: 0, endCharacter: 11 },
+        anchor: { text: "total", before: "const ", after: " = one" },
+        color: "green",
+        author: { login: "ada", id: "42" },
+        createdAt: "t",
+        updatedAt: "t",
+        comments: [],
+        root: Uri.file(root).toString()
+      })
+    );
+    await turnOn(marker);
+    faults.writeDelayMs = 700;
+    drive(editor, [select(document, 6, 11)]);
+    await new Promise((done) => setTimeout(done, 650));
+    drive(editor, [select(document, 6, 17)]);
+    await new Promise((done) => setTimeout(done, 900));
+    faults.writeDelayMs = 0;
+    await quiet(store);
+    const texts = store.all.map((entry) => entry.anchor.text).sort();
+    assert.equal(new Set(texts).size, texts.length, `duplicates in ${JSON.stringify(texts)}`);
+  });
+});
+
 describe("turning the marker off", () => {
   it("stops when the notes are hidden", async () => {
     const { marker } = await rig();
