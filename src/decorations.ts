@@ -26,6 +26,7 @@ export class HighlightRenderer implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private styles = new Map<string, Style>();
   private painted = new WeakMap<vscode.TextEditor, Style>();
+  private closed = false;
   private badge: vscode.TextEditorDecorationType | undefined;
   private hovers = new Map<string, vscode.MarkdownString>();
 
@@ -174,6 +175,9 @@ export class HighlightRenderer implements vscode.Disposable {
     if (known) {
       return known;
     }
+    if (this.closed) {
+      return { palette: [], inline: "off", released: true, types: new Map(), gutters: new Map() };
+    }
     const palette = readPalette(resource);
     const opacity = readOpacity(resource);
     const marks = readGutterMarks(resource);
@@ -255,6 +259,7 @@ export class HighlightRenderer implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.closed = true;
     for (const style of this.styles.values()) {
       this.release(style);
     }
