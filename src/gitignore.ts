@@ -60,17 +60,16 @@ async function readIgnore(root: vscode.Uri): Promise<Ignore | undefined> {
   return { uri, lines, eol };
 }
 
-let reportedInPlace = false;
+const reportedInPlace = new Set<string>();
 
 async function writeIgnore(ignore: Ignore, lines: string[]): Promise<boolean> {
   const text = lines.length === 0 ? "" : `${lines.join(ignore.eol)}${ignore.eol}`;
-  const scratch = vscode.Uri.joinPath(ignore.uri, "..", ".vscode");
   try {
-    await writeThroughTemporary(ignore.uri, Buffer.from(text, "utf8"), scratch, () => {
-      if (reportedInPlace) {
+    await writeThroughTemporary(ignore.uri, Buffer.from(text, "utf8"), () => {
+      if (reportedInPlace.has(ignore.uri.fsPath)) {
         return;
       }
-      reportedInPlace = true;
+      reportedInPlace.add(ignore.uri.fsPath);
       void vscode.window.showWarningMessage(
         `CodeLight saved ${ignore.uri.fsPath} in place because it cannot create a temporary file. An interrupted save could truncate it.`
       );

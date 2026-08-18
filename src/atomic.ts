@@ -4,16 +4,16 @@ import { newId } from "./ids";
 
 export const TEMPORARY_NAME = /^codelight\.write-.+\.tmp$/;
 
-export interface TargetInfo {
+interface TargetInfo {
   shared: boolean;
   mode: number;
 }
 
-export function temporaryName(): string {
+function temporaryName(): string {
   return `codelight.write-${newId()}.tmp`;
 }
 
-export function isPermissionDenied(error: unknown): boolean {
+function isPermissionDenied(error: unknown): boolean {
   if (error instanceof vscode.FileSystemError) {
     return error.code === "NoPermissions";
   }
@@ -44,16 +44,16 @@ async function discard(temporary: vscode.Uri): Promise<void> {
 export async function writeThroughTemporary(
   target: vscode.Uri,
   bytes: Uint8Array,
-  scratch: vscode.Uri,
   onInPlace: () => void
 ): Promise<void> {
-  await vscode.workspace.fs.createDirectory(scratch);
+  const folder = vscode.Uri.joinPath(target, "..");
+  await vscode.workspace.fs.createDirectory(folder);
   const existing = await inspectTarget(target);
   if (target.scheme !== "file" || existing?.shared) {
     await vscode.workspace.fs.writeFile(target, bytes);
     return;
   }
-  const temporary = vscode.Uri.joinPath(scratch, temporaryName());
+  const temporary = vscode.Uri.joinPath(folder, temporaryName());
   try {
     await vscode.workspace.fs.writeFile(temporary, bytes);
   } catch (error) {

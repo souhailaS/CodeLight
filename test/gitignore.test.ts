@@ -16,6 +16,11 @@ import {
 } from "./fakevscode";
 import { keepPrivate, stopKeepingPrivate } from "../src/gitignore";
 
+const UNPRIVILEGED = typeof process.getuid === "function" && process.getuid() !== 0;
+const READ_ONLY_FOLDER = {
+  skip: UNPRIVILEGED ? false : "a read only folder needs a user its permissions apply to"
+};
+
 let root = "";
 let ignorePath = "";
 
@@ -34,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  fs.chmodSync(root, 0o700);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -144,30 +150,60 @@ describe("keeping the notes out of git", () => {
     assert.equal(text(), before);
     assert.ok(warnings().some((entry) => entry.includes(ignorePath)));
     assert.deepEqual(
-      fs.readdirSync(nodePath.join(root, ".vscode")).filter((name) => name.endsWith(".tmp")),
+      fs.readdirSync(root).filter((name) => name.endsWith(".tmp")),
       []
     );
   });
 
-  it("says so when it has to save in place", async () => {
+  it("says so when it has to save in place", READ_ONLY_FOLDER, async () => {
     fs.writeFileSync(ignorePath, "node_modules\n");
-    fs.mkdirSync(nodePath.join(root, ".vscode"), { recursive: true });
-    fs.chmodSync(nodePath.join(root, ".vscode"), 0o500);
+    fs.chmodSync(root, 0o500);
     messages.length = 0;
     await keepPrivate(Uri.file(root));
-    fs.chmodSync(nodePath.join(root, ".vscode"), 0o700);
+    fs.chmodSync(root, 0o700);
     assert.ok(text().includes("codelight.json"));
     assert.ok(warnings().some((entry) => entry.includes("in place")));
   });
 
   it("leaves a new file to the umask rather than forcing a mode", async () => {
-    const previous = process.umask(0o077);
-    try {
-      await keepPrivate(Uri.file(root));
-    } finally {
-      process.umask(previous);
+    for (const [mask, expected] of [
+      [0o077, 0o600],
+      [0o022, 0o644]
+    ]) {
+      fs.rmSync(ignorePath, { force: true });
+      const previous = process.umask(mask);
+      try {
+        await keepPrivate(Uri.file(root));
+      } finally {
+        process.umask(previous);
+      }
+      assert.equal(fs.statSync(ignorePath).mode & 0o777, expected, `umask ${mask.toString(8)}`);
     }
-    assert.equal(fs.statSync(ignorePath).mode & 0o077, 0);
+  });
+
+  it("does not make a vscode folder it did not need", async () => {
+    await keepPrivate(Uri.file(root));
+    assert.ok(text().includes("codelight.json"));
+    assert.equal(fs.existsSync(nodePath.join(root, ".vscode")), false);
+  });
+
+  it("warns once for each folder it saves in place", READ_ONLY_FOLDER, async () => {
+    const second = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-other-"));
+    const other = nodePath.join(second, ".gitignore");
+    fs.writeFileSync(ignorePath, "node_modules\n");
+    fs.writeFileSync(other, "node_modules\n");
+    fs.chmodSync(root, 0o500);
+    fs.chmodSync(second, 0o500);
+    messages.length = 0;
+    await keepPrivate(Uri.file(root));
+    await keepPrivate(Uri.file(second));
+    fs.chmodSync(root, 0o700);
+    fs.chmodSync(second, 0o700);
+    const said = warnings().filter((entry) => entry.includes("in place"));
+    assert.equal(said.length, 2);
+    assert.ok(said.some((entry) => entry.includes(ignorePath)));
+    assert.ok(said.some((entry) => entry.includes(other)));
+    fs.rmSync(second, { recursive: true, force: true });
   });
 
   it("writes a hard linked file in place", async () => {

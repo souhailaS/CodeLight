@@ -520,9 +520,7 @@ export class FolderStore implements vscode.Disposable {
 
   private async writeStore(target: vscode.Uri, content: string): Promise<void> {
     const bytes = await encodeStore(content, target);
-    await writeThroughTemporary(target, bytes, vscode.Uri.joinPath(target, ".."), () =>
-      this.warnAboutInPlace(target)
-    );
+    await writeThroughTemporary(target, bytes, () => this.warnAboutInPlace(target));
   }
 
   private async probe(target: vscode.Uri): Promise<boolean | undefined> {
@@ -547,7 +545,11 @@ export class FolderStore implements vscode.Disposable {
   }
 
   private async removeStaleTemporaries(root: vscode.Uri): Promise<void> {
-    const folder = vscode.Uri.joinPath(root, ".vscode");
+    await this.removeStaleFrom(root);
+    await this.removeStaleFrom(vscode.Uri.joinPath(root, ".vscode"));
+  }
+
+  private async removeStaleFrom(folder: vscode.Uri): Promise<void> {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(folder);
