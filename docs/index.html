@@ -99,7 +99,7 @@
 
 <h3>Keep them in a layer of their own</h3>
 <p>Plenty of what you want to write down is not meant to ship. A doubt about a function, a reminder to check something later, a question for a colleague tomorrow. Put that in the source and it becomes part of the product and part of everyone's diff, and someone has to remember to take it out again.</p>
-<p>CodeLight keeps those notes beside the code rather than inside it. Commit the CodeLight file in <code>.vscode</code>, either <code>codelight.json</code> or <code>codelight.json.gz</code>, and the whole team reads the layer. Add it to your <code>.gitignore</code> and it never leaves your machine, so you can be as blunt as you like while reading and none of it ever reaches the repository.</p>
+<p>CodeLight keeps those notes beside the code rather than inside it. Commit the CodeLight file in <code>.vscode</code>, either <code>codelight.json</code> or <code>codelight.json.gz</code>, and the whole team reads the layer. Add it to your <code>.gitignore</code> before you ever commit it and it stays on your machine, so you can be as blunt as you like while reading. A file git already tracks stays tracked until you run <code>git rm --cached</code> on it.</p>
 </section>
 
 <section id="what">
@@ -107,9 +107,9 @@
 <p><img src="demo.gif" alt="CodeLight in action" style="max-width:100%;border:1px solid #dddddd" /></p>
 <ul>
   <li>Highlights any selection in a colour you choose, from a palette you can redefine.</li>
-  <li>Turns on a marker so everything you select gets highlighted until you turn it off.</li>
+  <li>Turns on a marker so each new selection gets highlighted until you turn it off, leaving text that is already highlighted as it is.</li>
   <li>Hides every highlight and comment with one button, and brings them back with the same one.</li>
-  <li>Attaches comments and replies, each one attributed to a verified GitHub account.</li>
+  <li>Attaches comments and replies, each one signed with the GitHub account that was signed in when it was written.</li>
   <li>Shows the thread when you hover the highlight, and the latest note inline at the end of the line.</li>
   <li>Lists every annotation in the project in a panel, grouped by file, filtered by colour, click to jump.</li>
   <li>Moves highlights with your edits, and finds the text again when it moves away.</li>

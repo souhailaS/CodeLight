@@ -101,7 +101,7 @@ export async function keepPrivate(root: vscode.Uri): Promise<void> {
   const missing = ENTRIES.filter((entry) => !present.has(entry));
   if (missing.length === 0 && !negated) {
     void vscode.window.showInformationMessage(
-      `The CodeLight notes are already out of git, ${ignore.uri.fsPath} names them both.`
+      `${ignore.uri.fsPath} already names both CodeLight files. A file git already tracks stays tracked until you run git rm --cached on it.`
     );
     return;
   }
@@ -123,8 +123,8 @@ export async function keepPrivate(root: vscode.Uri): Promise<void> {
   const repository = await exists(vscode.Uri.joinPath(root, ".git"));
   const note = repository
     ? "A file that git already tracks stays tracked until you run git rm --cached on it, and committing that removal takes the file out of everyone else's checkout too."
-    : `${root.fsPath} is not a git repository yet, so the rule only takes effect once it becomes one.`;
-  await reveal(ignore.uri, `CodeLight notes are now ignored by git. ${note}`);
+    : `CodeLight found no .git in ${root.fsPath}. If this folder is not inside a git repository the rule does nothing until it is.`;
+  await reveal(ignore.uri, `${ignore.uri.fsPath} now names the CodeLight notes. ${note}`);
 }
 
 export async function stopKeepingPrivate(root: vscode.Uri): Promise<void> {
@@ -134,7 +134,7 @@ export async function stopKeepingPrivate(root: vscode.Uri): Promise<void> {
   }
   if (!ignore.lines.some(isEntry)) {
     void vscode.window.showInformationMessage(
-      `The CodeLight notes already go into git, nothing in ${ignore.uri.fsPath} keeps them out.`
+      `Nothing in ${ignore.uri.fsPath} names the CodeLight notes. Another rule such as .vscode/* can still keep them out, so check git check-ignore if they do not show up.`
     );
     return;
   }

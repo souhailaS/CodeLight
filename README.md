@@ -18,14 +18,14 @@ Shared highlights and comments for VS Code, kept beside your code instead of ins
 
 **Keep them in a layer of their own.** Plenty of what you want to write down is not meant to ship. A doubt about a function, a reminder to check something later, a question for a colleague tomorrow. Put that in the source and it becomes part of the product and part of everyone's diff, and someone has to remember to take it out again.
 
-CodeLight keeps those notes beside the code rather than inside it. Commit the CodeLight file in `.vscode`, either `codelight.json` or `codelight.json.gz`, and the whole team reads the layer. Add it to your `.gitignore` and it never leaves your machine, so you can be as blunt as you like while reading and none of it ever reaches the repository.
+CodeLight keeps those notes beside the code rather than inside it. Commit the CodeLight file in `.vscode`, either `codelight.json` or `codelight.json.gz`, and the whole team reads the layer. Add it to your `.gitignore` before you ever commit it and it stays on your machine, so you can be as blunt as you like while reading. A file git already tracks stays tracked until you run `git rm --cached` on it.
 
 ## What it does
 
 * Highlight any selection in a colour of your choice, with a palette you can redefine.
-* Turn on the marker and everything you select gets highlighted until you turn it off.
+* Turn on the marker and each new selection gets highlighted until you turn it off. Text that is already highlighted is left as it is.
 * Hide every highlight and comment with one button, and bring them back with the same one.
-* Attach comments to a highlight and reply to your colleagues, each one attributed to a verified GitHub account.
+* Attach comments to a highlight and reply to your colleagues, each one signed with the GitHub account that was signed in when it was written.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
 * Give every folder of a multi root workspace its own annotation file, so notes follow the folder they belong to.

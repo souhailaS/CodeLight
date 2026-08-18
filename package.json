@@ -1,7 +1,7 @@
 {
   "name": "codelight",
   "displayName": "CodeLight",
-  "description": "Shared highlights and inline comments that live in .vscode",
+  "description": "Highlights and comments for VS Code, kept beside your code and shared through git when you commit them.",
   "version": "0.6.1",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "media/icon.png",
@@ -140,7 +140,7 @@
       },
       {
         "command": "codelight.shareInGit",
-        "title": "Let the Notes Go Into Git",
+        "title": "Take the Notes Out of .gitignore",
         "category": "CodeLight"
       },
       {
@@ -670,7 +670,7 @@
           {
             "id": "codelight.step.share",
             "title": "Share it, or keep it",
-            "description": "Commit `.vscode/codelight.json` to share your notes, or gitignore it to keep them private.",
+            "description": "Commit the CodeLight file under `.vscode` to share your notes, or gitignore it to keep them private.",
             "media": {
               "markdown": "media/walkthrough/share.md",
               "altText": "Sharing through git"
@@ -682,7 +682,7 @@
     "viewsWelcome": [
       {
         "view": "codelight.annotations",
-        "contents": "No notes in this project yet.\n\nSelect some code and highlight it, then add a comment to start a thread.\n\n[Highlight Selection](command:codelight.addHighlight)\n\n[Open the walkthrough](command:codelight.openWalkthrough)",
+        "contents": "CodeLight is showing no notes for this project.\n\nSelect some code and highlight it, then add a comment to start a thread.\n\n[Highlight Selection](command:codelight.addHighlight)\n\n[Open the walkthrough](command:codelight.openWalkthrough)",
         "when": "workbenchState != empty && !codelight.filtered"
       },
       {

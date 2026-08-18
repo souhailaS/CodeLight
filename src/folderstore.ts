@@ -641,7 +641,7 @@ export class FolderStore implements vscode.Disposable {
     }
     const label = dropped === 1 ? "entry" : "entries";
     void vscode.window.showWarningMessage(
-      `CodeLight skipped ${dropped} unreadable ${label} in ${target.fsPath}. They stay in the file untouched.`
+      `CodeLight skipped ${dropped} unreadable ${label} in ${target.fsPath}. They stay in the file, though CodeLight moves them to the end when it saves.`
     );
   }
 

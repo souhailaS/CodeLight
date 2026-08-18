@@ -209,6 +209,10 @@ export class AnnotationStore implements vscode.Disposable {
     return folders.length === 1 ? folders[0] : undefined;
   }
 
+  async pickFolder(): Promise<vscode.Uri | undefined> {
+    return (await this.chooseFolder())?.rootUri;
+  }
+
   private async chooseFolder(): Promise<FolderStore | undefined> {
     const folders = this.folders;
     if (folders.length <= 1) {
@@ -223,7 +227,7 @@ export class AnnotationStore implements vscode.Disposable {
         picked: store === current,
         store
       })),
-      { title: "CodeLight", placeHolder: "Pick the folder to convert" }
+      { title: "CodeLight", placeHolder: "Pick a folder" }
     );
     return picked?.store;
   }

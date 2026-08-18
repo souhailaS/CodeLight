@@ -204,21 +204,25 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("codelight.keepPrivate", async () => {
       await ready;
-      const root = store.rootUri;
-      if (!root) {
+      if (!store.isReady) {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
       }
-      await keepPrivate(root);
+      const root = await store.pickFolder();
+      if (root) {
+        await keepPrivate(root);
+      }
     }),
     vscode.commands.registerCommand("codelight.shareInGit", async () => {
       await ready;
-      const root = store.rootUri;
-      if (!root) {
+      if (!store.isReady) {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
       }
-      await stopKeepingPrivate(root);
+      const root = await store.pickFolder();
+      if (root) {
+        await stopKeepingPrivate(root);
+      }
     }),
     vscode.commands.registerCommand("codelight.convertStorage", async () => {
       await ready;
@@ -231,9 +235,11 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const account = identity.identity;
-      const who = account ? account.login : "nobody";
+      const count = store.all.length;
       void vscode.window.showInformationMessage(
-        `CodeLight tracks ${store.all.length} annotations, signed in as ${who}.`
+        `CodeLight tracks ${count} annotation${count === 1 ? "" : "s"}, ${
+          account ? `signed in as ${account.login}` : "and you are not signed in"
+        }.`
       );
     })
   );
