@@ -7,6 +7,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const outdir = resolve(here, "..", "out", "test");
 const names = (await readdir(here)).filter((name) => name.endsWith(".test.ts"));
 
+if (names.length === 0) {
+  throw new Error("no test files found, so there is nothing to run");
+}
+
 await rm(outdir, { recursive: true, force: true });
 
 await build({
