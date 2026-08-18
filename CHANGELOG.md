@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+* The two git commands now replace `.gitignore` the way CodeLight replaces its own store, through a temporary file renamed over the old one. An interrupted save leaves the file exactly as it was rather than truncated, the permissions of the file are kept, a new file follows your umask, and CodeLight says so on the rare occasion it has to write in place instead.
+* The comment cards in the This File view sit on their own surface, so they read as cards rather than loose text.
+
 ## 0.5.1
 
 * Each folder of a multi root workspace now renders with its own palette, opacity, inline comment mode and gutter marks, rather than every folder borrowing whichever settings the window had. The colour picker offers the palette of the folder the file lives in.
