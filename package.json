@@ -250,7 +250,7 @@
       },
       {
         "command": "codelight.addComment",
-        "key": "ctrl+k ctrl+;",
+        "key": "ctrl+k ctrl+g",
         "mac": "cmd+alt+m",
         "when": "editorTextFocus"
       }
