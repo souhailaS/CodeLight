@@ -4,6 +4,8 @@
 
 Shared highlights and comments for VS Code, kept beside your code instead of inside it.
 
+[Get it on the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=souhailaserbout.codelight)
+
 ![CodeLight in action](https://raw.githubusercontent.com/souhailaS/CodeLight/main/media/demo.gif)
 
 ## Why
@@ -56,12 +58,18 @@ If you commit the compressed file, add `*.json.gz binary` to your `.gitattribute
 
 ## Installing
 
-CodeLight is not on the marketplace yet. Build it and install the package locally.
+Search for **CodeLight** in the Extensions view, or install it from a terminal.
+
+```
+code --install-extension souhailaserbout.codelight
+```
+
+To build it from source instead, package the repository and install the result.
 
 ```
 npm install
 npx @vscode/vsce package
-code --install-extension codelight-0.0.1.vsix
+code --install-extension codelight-0.4.0.vsix
 ```
 
 ## License

@@ -76,6 +76,7 @@
     <a href="#what">What it does</a>
     <a href="#use">Using it</a>
     <a href="#install">Install</a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=souhailaserbout.codelight">Marketplace</a>
     <a href="https://github.com/souhailaS/CodeLight">Source on GitHub</a>
   </nav>
   <p class="aside-foot">Noncommercial use only.<br />PolyForm Noncommercial 1.0.0.</p>
@@ -142,12 +143,14 @@
 
 <section id="install">
 <h2>Install</h2>
-<p>Not on the marketplace yet. Build it and install the package.</p>
+<p>Search for <b>CodeLight</b> in the Extensions view, or install it from a terminal.</p>
+<pre><code>code --install-extension souhailaserbout.codelight</code></pre>
+<p>To build it from source instead, package the repository and install the result.</p>
 <pre><code>git clone https://github.com/souhailaS/CodeLight.git
 cd CodeLight
 npm install
 npx @vscode/vsce package
-code --install-extension codelight-0.0.1.vsix</code></pre>
+code --install-extension codelight-0.4.0.vsix</code></pre>
 </section>
 
 </main>
