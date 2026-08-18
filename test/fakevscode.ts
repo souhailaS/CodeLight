@@ -90,6 +90,76 @@ export class EventEmitter<T> {
   }
 }
 
+export class Position {
+  constructor(
+    public line: number,
+    public character: number
+  ) {}
+  isEqual(other: Position): boolean {
+    return this.line === other.line && this.character === other.character;
+  }
+  isBefore(other: Position): boolean {
+    return this.line < other.line || (this.line === other.line && this.character < other.character);
+  }
+  isBeforeOrEqual(other: Position): boolean {
+    return this.isBefore(other) || this.isEqual(other);
+  }
+  isAfter(other: Position): boolean {
+    return other.isBefore(this);
+  }
+  isAfterOrEqual(other: Position): boolean {
+    return this.isAfter(other) || this.isEqual(other);
+  }
+}
+
+export class Range {
+  readonly start: Position;
+  readonly end: Position;
+  constructor(
+    startLine: number | Position,
+    startCharacter: number | Position,
+    endLine?: number,
+    endCharacter?: number
+  ) {
+    if (startLine instanceof Position && startCharacter instanceof Position) {
+      this.start = startLine;
+      this.end = startCharacter;
+      return;
+    }
+    this.start = new Position(startLine as number, startCharacter as number);
+    this.end = new Position(endLine ?? 0, endCharacter ?? 0);
+  }
+  get isEmpty(): boolean {
+    return this.start.isEqual(this.end);
+  }
+  get isSingleLine(): boolean {
+    return this.start.line === this.end.line;
+  }
+  isEqual(other: Range): boolean {
+    return this.start.isEqual(other.start) && this.end.isEqual(other.end);
+  }
+  contains(other: Position | Range): boolean {
+    const from = other instanceof Range ? other.start : other;
+    const to = other instanceof Range ? other.end : other;
+    return this.start.isBeforeOrEqual(from) && this.end.isAfterOrEqual(to);
+  }
+}
+
+export class MarkdownString {
+  value = "";
+  isTrusted = false;
+  supportHtml = false;
+  supportThemeIcons = false;
+  appendMarkdown(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+  appendText(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+}
+
 export class RelativePattern {
   constructor(
     public base: Uri,
@@ -198,7 +268,7 @@ export const window = {
     opened.push(document as { uri: Uri });
     return Promise.resolve(undefined);
   },
-  visibleTextEditors: [] as Array<{ document: unknown }>,
+  visibleTextEditors: [] as Editor[],
   onDidChangeVisibleTextEditors() {
     return { dispose: () => undefined };
   },
@@ -214,6 +284,23 @@ export const window = {
     return type;
   }
 };
+
+export interface Editor {
+  document: unknown;
+  applied: Map<Decoration, unknown[]>;
+  setDecorations(type: Decoration, ranges: unknown[]): void;
+}
+
+export function editorFor(document: unknown): Editor {
+  const editor: Editor = {
+    document,
+    applied: new Map(),
+    setDecorations(type: Decoration, ranges: unknown[]): void {
+      editor.applied.set(type, ranges);
+    }
+  };
+  return editor;
+}
 
 export interface Decoration {
   options: unknown;
@@ -351,8 +438,23 @@ export const workspace = {
   getConfiguration(section: string, resource?: Uri | null) {
     return {
       get<T>(key: string): T | undefined {
-        const scoped = resource ? configuration.get(`${section}.${key}@${resource.path}`) : undefined;
-        return (scoped ?? configuration.get(`${section}.${key}`)) as T | undefined;
+        const prefix = `${section}.${key}@`;
+        let best: unknown;
+        let longest = -1;
+        if (resource) {
+          for (const [stored, value] of configuration) {
+            if (!stored.startsWith(prefix)) {
+              continue;
+            }
+            const folder = stored.slice(prefix.length);
+            const inside = resource.path === folder || resource.path.startsWith(`${folder}/`);
+            if (inside && folder.length > longest) {
+              best = value;
+              longest = folder.length;
+            }
+          }
+        }
+        return (longest >= 0 ? best : configuration.get(`${section}.${key}`)) as T | undefined;
       }
     };
   },
@@ -372,7 +474,14 @@ export const workspace = {
     return { dispose: () => undefined };
   },
   getWorkspaceFolder(target: Uri): { uri: Uri; name: string; index: number } | undefined {
-    return workspace.workspaceFolders.find((folder) => target.path.startsWith(folder.uri.path));
+    let best: { uri: Uri; name: string; index: number } | undefined;
+    for (const folder of workspace.workspaceFolders) {
+      const inside = target.path === folder.uri.path || target.path.startsWith(`${folder.uri.path}/`);
+      if (inside && (!best || folder.uri.path.length > best.uri.path.length)) {
+        best = folder;
+      }
+    }
+    return best;
   },
   createFileSystemWatcher(pattern?: unknown) {
     const watcher: Watcher = {

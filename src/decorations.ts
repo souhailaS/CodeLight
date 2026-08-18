@@ -57,11 +57,6 @@ export class HighlightRenderer implements vscode.Disposable {
     this.renderAll();
   }
 
-  get colors(): readonly PaletteColor[] {
-    const editor = vscode.window.activeTextEditor;
-    return this.colorsFor(editor?.document.uri);
-  }
-
   colorsFor(target: vscode.Uri | undefined): readonly PaletteColor[] {
     return this.styleFor(target ? this.store.rootFor(target) : undefined).palette;
   }
@@ -115,6 +110,17 @@ export class HighlightRenderer implements vscode.Disposable {
         const line = labels.get(anchorLine) ?? [];
         line.push(label.trim());
         labels.set(anchorLine, line);
+      }
+    }
+    for (const other of this.styles.values()) {
+      if (other === style) {
+        continue;
+      }
+      for (const type of other.types.values()) {
+        editor.setDecorations(type, []);
+      }
+      for (const type of other.gutters.values()) {
+        editor.setDecorations(type, []);
       }
     }
     for (const [key, options] of grouped) {
@@ -227,7 +233,9 @@ export class HighlightRenderer implements vscode.Disposable {
       this.release(style);
     }
     this.styles = new Map();
-    this.badge?.dispose();
+    if (this.badge) {
+      return;
+    }
     this.badge = vscode.window.createTextEditorDecorationType({
       after: {
         color: new vscode.ThemeColor("editorCodeLens.foreground"),
