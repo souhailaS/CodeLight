@@ -227,7 +227,7 @@ describe("deleting a comment another window removed", () => {
     await store.refresh();
     messages.length = 0;
     await view.deleteComment(entry);
-    assert.ok(warnings().some((line) => line.includes("no longer in the shared file")));
+    assert.ok(warnings().some((line) => line.includes("no longer in the annotation file")));
   });
 });
 

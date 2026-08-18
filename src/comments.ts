@@ -114,10 +114,10 @@ export class CommentCommands {
     }
     const rescued = typed === undefined ? false : await rescue(typed);
     const reason = !ran
-      ? "CodeLight could not update the shared file."
+      ? "CodeLight could not update the annotation file."
       : found
         ? "CodeLight could not save the comment."
-        : "That comment is no longer in the shared file.";
+        : "That comment is no longer in the annotation file.";
     void vscode.window.showWarningMessage(withRescue(reason, rescued));
   }
 
@@ -183,7 +183,7 @@ export class CommentCommands {
     } else {
       annotation = this.store.byId(annotationId);
       if (!annotation) {
-        void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+        void vscode.window.showWarningMessage("That highlight is no longer in the annotation file.");
       }
     }
     if (!annotation) {

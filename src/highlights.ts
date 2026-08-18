@@ -307,7 +307,7 @@ export class HighlightCommands {
     });
     if (missing) {
       await this.store.refresh();
-      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      void vscode.window.showWarningMessage("That highlight is no longer in the annotation file.");
       return;
     }
     if (drifted) {
@@ -318,7 +318,7 @@ export class HighlightCommands {
       return;
     }
     if (!removed) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      void vscode.window.showWarningMessage("CodeLight could not update the annotation file.");
     }
   }
 
@@ -326,7 +326,7 @@ export class HighlightCommands {
     const editor = vscode.window.activeTextEditor;
     const root = editor ? this.store.rootFor(editor.document.uri) : undefined;
     if (!editor || !root) {
-      void vscode.window.showWarningMessage("Open a tracked file to clean up its highlights.");
+      void vscode.window.showWarningMessage("Open a file inside a folder of this workspace to clean up its highlights.");
       return;
     }
     const orphans = this.store
@@ -392,7 +392,7 @@ export class HighlightCommands {
     }
     const remaining = [...expected.keys()].some((id) => this.store.byId(id) !== undefined);
     if (!saved && remaining) {
-      void vscode.window.showWarningMessage("CodeLight could not update the shared file.");
+      void vscode.window.showWarningMessage("CodeLight could not update the annotation file.");
     }
   }
 
@@ -421,7 +421,7 @@ export class HighlightCommands {
       updatedAt: timestamp()
     }));
     if (!saved) {
-      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
+      void vscode.window.showWarningMessage("That highlight is no longer in the annotation file.");
     }
   }
 }
