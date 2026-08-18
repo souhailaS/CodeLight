@@ -9,6 +9,11 @@ export async function rescue(body: string): Promise<boolean> {
   }
 }
 
-export function withRescue(message: string, rescued: boolean): string {
-  return rescued ? `${message} Your comment was copied to the clipboard.` : message;
+export function withRescue(message: string, rescued: boolean, many = false): string {
+  if (!rescued) {
+    return message;
+  }
+  return many
+    ? `${message} They were copied to the clipboard together.`
+    : `${message} Your comment was copied to the clipboard.`;
 }

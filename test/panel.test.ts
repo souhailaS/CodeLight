@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  details,
   messages,
   queueAnswer,
   resetFake,
@@ -307,6 +308,46 @@ describe("deleting from the panel", () => {
       store.all.map((entry) => entry.id),
       ["three"]
     );
+  });
+
+  it("keeps the caveat out of a modal that has no filter on", async () => {
+    const { store, commands } = await panel();
+    const gone = annotation("one", "src/a.ts");
+    gone.orphaned = true;
+    assert.ok(await store.add(gone));
+    details.length = 0;
+    queueAnswer("Delete");
+    await commands.deleteOrphansEverywhere();
+    assert.ok(details.some((line) => line.includes("every folder of the workspace")));
+    assert.equal(
+      details.some((line) => line.includes("colour filter")),
+      false
+    );
+  });
+
+  it("says the colour filter does not narrow the clearing", async () => {
+    const { store, tree, commands } = await panel();
+    const gone = annotation("one", "src/a.ts", "yellow");
+    gone.orphaned = true;
+    const other = annotation("two", "src/b.ts", "pink");
+    other.orphaned = true;
+    assert.ok(await store.add(gone));
+    assert.ok(await store.add(other));
+    tree.setFilter("yellow");
+    details.length = 0;
+    queueAnswer("Delete");
+    await commands.deleteOrphansEverywhere();
+    assert.ok(details.some((line) => line.includes("colour filter does not narrow it")));
+    assert.ok(details.some((line) => line.includes("every folder of the workspace")));
+    assert.deepEqual(store.all, []);
+  });
+
+  it("says so when a row points at a highlight that is gone", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    messages.length = 0;
+    await commands.reveal("not-a-real-id");
+    assert.ok(warnings().some((line) => line.includes("no longer in the annotation file")));
   });
 
   it("says so when there is no orphan to clear", async () => {

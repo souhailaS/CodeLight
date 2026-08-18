@@ -11,6 +11,8 @@ import {
   faults,
   live,
   messages,
+  picks,
+  queuePick,
   queueAnswer,
   resetFake,
   setConfiguration,
@@ -828,6 +830,33 @@ describe("what the file watcher reports", () => {
     assert.equal(live().length, 1);
     store.dispose();
     assert.equal(live().length, 0);
+  });
+});
+
+describe("picking a folder", () => {
+  it("takes the only folder without asking", async () => {
+    const store = await open("json");
+    picks.length = 0;
+    const picked = await store.pickFolder("Pick one");
+    assert.equal(picked?.fsPath, root);
+    assert.deepEqual(picks, []);
+  });
+
+  it("asks when there are several and honours the answer", async () => {
+    const second = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-pick-"));
+    fs.mkdirSync(nodePath.join(second, ".vscode"));
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "first", index: 0 },
+      { uri: Uri.file(second), name: "second", index: 1 }
+    ];
+    const store = await open("json");
+    picks.length = 0;
+    queuePick(1);
+    assert.equal((await store.pickFolder("Pick one"))?.fsPath, second);
+    assert.equal(picks.length, 1);
+    assert.equal((picks[0].options as { placeHolder: string }).placeHolder, "Pick one");
+    assert.equal(await store.pickFolder("Pick one"), undefined);
+    fs.rmSync(second, { recursive: true, force: true });
   });
 });
 

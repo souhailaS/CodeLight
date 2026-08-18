@@ -51,7 +51,7 @@ export class FileStatus implements vscode.Disposable {
     const withStranded =
       stranded === 0
         ? detail
-        : `${detail}, ${stranded} of them stranded because the text they marked is gone`;
+        : `${detail}, plus ${stranded} stranded because the text they marked is gone`;
     const seen = this.visibility.visible ? withStranded : `${withStranded}, currently hidden`;
     this.item.tooltip = this.say(seen, editor.document.uri);
     this.item.show();

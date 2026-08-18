@@ -112,7 +112,7 @@ describe("what the status bar counts", () => {
     ]);
     assert.ok(shown.text.includes("1 highlight, 3"), shown.text);
     assert.ok(shown.text.includes("1"), shown.text);
-    assert.ok(shown.tooltip.includes("1 of them stranded"), shown.tooltip);
+    assert.ok(shown.tooltip.includes("plus 1 stranded"), shown.tooltip);
   });
 
   it("keeps showing a file whose notes are all stranded", async () => {
@@ -139,6 +139,17 @@ describe("what the status bar counts", () => {
     const shown = await bar([annotation("one", [])]);
     assert.equal(shown.tooltip.includes("repository"), false);
     assert.equal(shown.tooltip.includes("machine"), false);
+  });
+
+  it("keeps the stranded count out of the highlight count", async () => {
+    const shown = await bar([
+      annotation("one", [comment("c1")]),
+      annotation("two", [], true),
+      annotation("three", [], true)
+    ]);
+    assert.ok(shown.text.includes("1 highlight"), shown.text);
+    assert.ok(shown.tooltip.includes("plus 2 stranded"), shown.tooltip);
+    assert.equal(shown.tooltip.includes("of them"), false);
   });
 
   it("says the notes are hidden while they are", async () => {

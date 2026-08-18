@@ -163,7 +163,7 @@ describe("the cards the file view posts", () => {
 
   it("says so when the project has no notes at all", async () => {
     const { fake } = await mount([]);
-    assert.ok(latest(fake).note.includes("no CodeLight annotations"));
+    assert.ok(latest(fake).note.includes("showing no annotations"));
   });
 
   it("marks a stranded highlight rather than dropping it", async () => {

@@ -182,7 +182,7 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   async convertStorage(): Promise<boolean> {
-    const store = await this.chooseFolder();
+    const store = await this.chooseFolder("Pick the folder to convert");
     return store ? store.convertStorage() : false;
   }
 
@@ -209,7 +209,11 @@ export class AnnotationStore implements vscode.Disposable {
     return folders.length === 1 ? folders[0] : undefined;
   }
 
-  private async chooseFolder(): Promise<FolderStore | undefined> {
+  async pickFolder(what: string): Promise<vscode.Uri | undefined> {
+    return (await this.chooseFolder(what))?.rootUri;
+  }
+
+  private async chooseFolder(what: string): Promise<FolderStore | undefined> {
     const folders = this.folders;
     if (folders.length <= 1) {
       return folders[0];
@@ -223,7 +227,7 @@ export class AnnotationStore implements vscode.Disposable {
         picked: store === current,
         store
       })),
-      { title: "CodeLight", placeHolder: "Pick the folder to convert" }
+      { title: "CodeLight", placeHolder: what }
     );
     return picked?.store;
   }

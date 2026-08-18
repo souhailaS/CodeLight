@@ -489,6 +489,12 @@ export const window = {
   },
   showWarningMessage(message: string, ...rest: unknown[]) {
     messages.push(`warning ${message}`);
+    for (const entry of rest) {
+      const text = (entry as { detail?: unknown })?.detail;
+      if (typeof text === "string") {
+        details.push(text);
+      }
+    }
     if (rest.length === 0) {
       return Promise.resolve(undefined);
     }
@@ -607,6 +613,8 @@ export enum OverviewRulerLane {
 }
 
 export const opened: Array<{ uri: Uri }> = [];
+
+export const details: string[] = [];
 export const shown: unknown[] = [];
 export const inputs: unknown[] = [];
 const typed: Array<string | undefined> = [];
@@ -852,6 +860,7 @@ export function resetFake(): void {
   window.activeTextEditor = undefined;
   window.visibleTextEditors = [];
   opened.length = 0;
+  details.length = 0;
   shown.length = 0;
   inputs.length = 0;
   typed.length = 0;

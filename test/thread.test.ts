@@ -132,4 +132,9 @@ describe("rescuing what the user typed", () => {
     assert.equal(withRescue("Gone.", false), "Gone.");
     assert.equal(withRescue("Gone.", true), "Gone. Your comment was copied to the clipboard.");
   });
+
+  it("speaks of several comments when several were lost", () => {
+    assert.equal(withRescue("Gone.", true, true), "Gone. They were copied to the clipboard together.");
+    assert.equal(withRescue("Gone.", false, true), "Gone.");
+  });
 });

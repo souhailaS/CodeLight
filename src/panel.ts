@@ -214,6 +214,7 @@ export class PanelCommands {
     const annotation = this.store.byId(annotationId);
     const uri = annotation ? this.store.uriFor(annotation) : undefined;
     if (!annotation || !uri) {
+      void vscode.window.showWarningMessage("That highlight is no longer in the annotation file.");
       return;
     }
     let document: vscode.TextDocument;
@@ -367,7 +368,15 @@ export class PanelCommands {
       comments === 0
         ? `Delete ${countLabel(orphans.length, "orphaned highlight")}?`
         : `Delete ${countLabel(orphans.length, "orphaned highlight")} and ${countLabel(comments, "comment")}?`;
-    const confirmed = await vscode.window.showWarningMessage(detail, { modal: true }, "Delete");
+    const scope =
+      this.tree.activeFilter === undefined
+        ? "This covers every folder of the workspace."
+        : "This covers every folder of the workspace. The colour filter does not narrow it.";
+    const confirmed = await vscode.window.showWarningMessage(
+      detail,
+      { modal: true, detail: scope },
+      "Delete"
+    );
     if (confirmed !== "Delete") {
       return;
     }

@@ -277,10 +277,11 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const rescued = await rescue(pending.join("\n\n"));
-    const many = rescued && pending.length > 1 ? ` All ${pending.length} were kept together.` : "";
-    void vscode.window.showWarningMessage(
-      withRescue("A comment you were editing was closed before it was saved.", rescued) + many
-    );
+    const many = pending.length > 1;
+    const what = many
+      ? `${pending.length} comments you were editing were closed before they were saved.`
+      : "A comment you were editing was closed before it was saved.";
+    void vscode.window.showWarningMessage(withRescue(what, rescued, many));
   }
 
   private closePending(): void {

@@ -447,7 +447,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
     if (this.store.all.length === 0) {
       return {
         head: "",
-        note: renderNote("This project has no CodeLight annotations yet."),
+        note: renderNote("CodeLight is showing no annotations for this project."),
         cards: []
       };
     }
