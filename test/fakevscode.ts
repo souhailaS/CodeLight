@@ -25,6 +25,9 @@ export class Uri {
   static file(value: string): Uri {
     return new Uri(value);
   }
+  static parse(value: string): Uri {
+    return new Uri(value);
+  }
   static joinPath(base: Uri, ...segments: string[]): Uri {
     return new Uri(nodePath.resolve(base.path, ...segments));
   }
@@ -94,6 +97,10 @@ export function setConfiguration(key: string, value: unknown): void {
   configuration.set(key, value);
 }
 
+export function setFolderConfiguration(root: Uri, key: string, value: unknown): void {
+  configuration.set(`${key}@${root.path}`, value);
+}
+
 export function queueAnswer(answer: string): void {
   answers.push(answer);
 }
@@ -137,10 +144,58 @@ export const window = {
   showTextDocument(document: unknown) {
     opened.push(document as { uri: Uri });
     return Promise.resolve(undefined);
+  },
+  visibleTextEditors: [] as Array<{ document: unknown }>,
+  onDidChangeVisibleTextEditors() {
+    return { dispose: () => undefined };
+  },
+  createTextEditorDecorationType(options: unknown) {
+    const type: Decoration = {
+      options,
+      disposed: false,
+      dispose(): void {
+        type.disposed = true;
+      }
+    };
+    decorations.push(type);
+    return type;
   }
 };
 
+export interface Decoration {
+  options: unknown;
+  disposed: boolean;
+  dispose(): void;
+}
+
+export const decorations: Decoration[] = [];
+
+export class ThemeColor {
+  constructor(public id: string) {}
+}
+
+export enum DecorationRangeBehavior {
+  OpenOpen = 0,
+  ClosedClosed = 1
+}
+
+export enum OverviewRulerLane {
+  Left = 1,
+  Center = 2,
+  Right = 4,
+  Full = 7
+}
+
 export const opened: Array<{ uri: Uri }> = [];
+
+export const commands = {
+  executeCommand(...rest: unknown[]) {
+    invoked.push(rest);
+    return Promise.resolve(undefined);
+  }
+};
+
+export const invoked: unknown[][] = [];
 
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: Uri; name: string; index: number }>,
@@ -193,12 +248,28 @@ export const workspace = {
       ]);
     }
   },
-  getConfiguration(section: string) {
+  getConfiguration(section: string, resource?: Uri | null) {
     return {
       get<T>(key: string): T | undefined {
-        return configuration.get(`${section}.${key}`) as T | undefined;
+        const scoped = resource ? configuration.get(`${section}.${key}@${resource.path}`) : undefined;
+        return (scoped ?? configuration.get(`${section}.${key}`)) as T | undefined;
       }
     };
+  },
+  onDidChangeConfiguration() {
+    return { dispose: () => undefined };
+  },
+  onDidOpenTextDocument() {
+    return { dispose: () => undefined };
+  },
+  onDidChangeTextDocument() {
+    return { dispose: () => undefined };
+  },
+  onDidSaveTextDocument() {
+    return { dispose: () => undefined };
+  },
+  onDidCloseTextDocument() {
+    return { dispose: () => undefined };
   },
   getWorkspaceFolder(target: Uri): { uri: Uri; name: string; index: number } | undefined {
     return workspace.workspaceFolders.find((folder) => target.path.startsWith(folder.uri.path));
@@ -227,5 +298,8 @@ export function resetFake(): void {
   workspace.workspaceFolders = [];
   workspace.textDocuments = [];
   window.activeTextEditor = undefined;
+  window.visibleTextEditors = [];
   opened.length = 0;
+  decorations.length = 0;
+  invoked.length = 0;
 }
