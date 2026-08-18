@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import { StorageMode } from "./paths";
 import { InlineMode } from "./thread";
 
+export type GutterMode = "always" | "highlights" | "off";
+
 export interface PaletteColor {
   id: string;
   label: string;
@@ -73,6 +75,15 @@ export function readInlineMode(resource?: vscode.Uri): InlineMode {
   return configured === "off" || configured === "count" || configured === "preview"
     ? configured
     : "preview";
+}
+
+export function readGutterMode(resource?: vscode.Uri): GutterMode {
+  const configured = configuration(resource).get<unknown>("commentGutter");
+  return configured === "highlights" || configured === "off" ? configured : "always";
+}
+
+export function readGutterMarks(resource?: vscode.Uri): boolean {
+  return configuration(resource).get<unknown>("gutterMarks") !== false;
 }
 
 export function readStorageMode(resource?: vscode.Uri): StorageMode {

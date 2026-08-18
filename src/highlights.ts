@@ -6,29 +6,39 @@ import { IdentityProvider } from "./identity";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
+import { Swatches } from "./swatches";
 import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
+import { Visibility } from "./visibility";
 import { snippet } from "./thread";
 
-function colorIcon(color: PaletteColor): vscode.ThemeIcon {
-  const isDefault = DEFAULT_PALETTE.some(
+function themeSwatch(color: PaletteColor): vscode.ThemeIcon {
+  const known = DEFAULT_PALETTE.some(
     (entry) => entry.id === color.id && entry.hex.toLowerCase() === color.hex.toLowerCase()
   );
-  return isDefault
+  return known
     ? new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor(`codelight.${color.id}`))
     : new vscode.ThemeIcon("circle-filled");
+}
+
+let swatches: Swatches | undefined;
+
+export function useSwatches(store: Swatches): void {
+  swatches = store;
 }
 
 export async function pickColor(
   palette: readonly PaletteColor[],
   title: string
 ): Promise<PaletteColor | undefined> {
-  const items = palette.map((color) => ({
-    label: color.label,
-    description: color.hex,
-    iconPath: colorIcon(color),
-    color
-  }));
+  const items = await Promise.all(
+    palette.map(async (color) => ({
+      label: color.label,
+      description: color.hex,
+      iconPath: (swatches ? await swatches.iconFor(color) : undefined) ?? themeSwatch(color),
+      color
+    }))
+  );
   const picked = await vscode.window.showQuickPick(items, {
     title,
     placeHolder: "Pick a highlight color"
@@ -41,11 +51,16 @@ export class HighlightCommands {
     private readonly store: AnnotationStore,
     private readonly identity: IdentityProvider,
     private readonly renderer: HighlightRenderer,
-    private readonly live: LiveRanges
+    private readonly live: LiveRanges,
+    private readonly visibility: Visibility
   ) {}
 
-  async add(): Promise<Annotation[]> {
-    const editor = vscode.window.activeTextEditor;
+  async add(
+    preset?: PaletteColor,
+    only?: readonly vscode.Range[],
+    target?: vscode.TextEditor
+  ): Promise<Annotation[]> {
+    const editor = target ?? vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("Open a file to highlight.");
       return [];
@@ -62,20 +77,27 @@ export class HighlightCommands {
       return [];
     }
     const ranges: vscode.Range[] = [];
-    for (const selection of editor.selections) {
+    const sources = only ?? editor.selections;
+    const taken = only === undefined ? [] : this.markedRanges(editor, relative);
+    for (const selection of sources) {
       const range = selection.isEmpty
-        ? editor.document.lineAt(selection.active.line).range
+        ? editor.document.lineAt(selection.start.line).range
         : new vscode.Range(selection.start, selection.end);
       if (range.isEmpty || ranges.some((existing) => existing.isEqual(range))) {
+        continue;
+      }
+      if (taken.some((existing) => existing.isEqual(range))) {
         continue;
       }
       ranges.push(range);
     }
     if (ranges.length === 0) {
       void vscode.window.showWarningMessage(
-        editor.selections.every((selection) => selection.isEmpty)
-          ? "This line is empty. Select some text to highlight."
-          : "Select some text to highlight."
+        only !== undefined
+          ? "That text is already highlighted."
+          : editor.selections.every((selection) => selection.isEmpty)
+            ? "This line is empty. Select some text to highlight."
+            : "Select some text to highlight."
       );
       return [];
     }
@@ -90,7 +112,7 @@ export class HighlightCommands {
     if (!author) {
       return [];
     }
-    const color = await pickColor(this.renderer.colors, "CodeLight");
+    const color = preset ?? (await pickColor(this.renderer.colors, "CodeLight"));
     if (!color) {
       return [];
     }
@@ -117,6 +139,9 @@ export class HighlightCommands {
       }
       placed = relocated;
       placedAnchors = rebuilt;
+    }
+    if (only === undefined) {
+      this.visibility.show();
     }
     const now = timestamp();
     const created = placed.map((range, index) => ({
@@ -167,6 +192,18 @@ export class HighlightCommands {
       const range = this.live.rangeFor(editor.document, annotation, spans);
       return range.isEmpty ? range.start.line === position.line : range.contains(position);
     });
+  }
+
+  markedRanges(editor: vscode.TextEditor, relative: string): vscode.Range[] {
+    const spans = this.live.spansFor(editor.document);
+    const taken: vscode.Range[] = [];
+    for (const annotation of this.store.forFile(relative)) {
+      if (annotation.orphaned === true) {
+        continue;
+      }
+      taken.push(this.live.rangeFor(editor.document, annotation, spans));
+    }
+    return taken;
   }
 
   isCollapsed(annotation: Annotation): boolean {
@@ -382,6 +419,7 @@ export class HighlightCommands {
     if (!color) {
       return;
     }
+    this.visibility.show();
     const saved = await this.store.update(annotation.id, (current) => ({
       ...current,
       color: color.id,

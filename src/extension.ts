@@ -2,21 +2,29 @@ import * as vscode from "vscode";
 import { CommentCommands } from "./comments";
 import { HighlightRenderer } from "./decorations";
 import { FileCommentsView } from "./fileview";
-import { HighlightCommands } from "./highlights";
+import { HighlightCommands, useSwatches } from "./highlights";
 import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
+import { MarkerMode } from "./marker";
+import { FileStatus } from "./statusbar";
 import { AnnotationStore } from "./store";
+import { Visibility } from "./visibility";
+import { Swatches } from "./swatches";
 import { ThreadComment, ThreadView } from "./threads";
 
 export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
   const store = new AnnotationStore();
   const live = new LiveRanges(store);
-  const renderer = new HighlightRenderer(store, live);
-  const highlights = new HighlightCommands(store, identity, renderer, live);
+  const visibility = new Visibility();
+  const renderer = new HighlightRenderer(store, live, visibility);
+  useSwatches(new Swatches(context.globalStorageUri));
+  const highlights = new HighlightCommands(store, identity, renderer, live, visibility);
+  const marker = new MarkerMode(identity, store, renderer, highlights, live, visibility);
+  const status = new FileStatus(store, visibility);
   const comments = new CommentCommands(store, identity, highlights);
-  const threads = new ThreadView(store, live, identity);
+  const threads = new ThreadView(store, live, identity, visibility);
   const tree = new AnnotationTree(store);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
@@ -32,6 +40,29 @@ export function activate(context: vscode.ExtensionContext): void {
     store,
     live,
     renderer,
+    marker,
+    status,
+    visibility,
+    vscode.commands.registerCommand("codelight.toggleVisibility", () => {
+      visibility.toggle();
+    }),
+    vscode.commands.registerCommand("codelight.showAgain", () => {
+      visibility.show();
+    }),
+    vscode.commands.registerCommand("codelight.markerOn", async () => {
+      await ready;
+      await marker.toggle();
+    }),
+    vscode.commands.registerCommand("codelight.markerOff", () => {
+      marker.off();
+    }),
+    vscode.commands.registerCommand("codelight.openWalkthrough", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.action.openWalkthrough",
+        `${context.extension.id}#codelight.start`,
+        false
+      );
+    }),
     threads,
     tree,
     view,

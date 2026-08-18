@@ -21,6 +21,8 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 ## What it does
 
 * Highlight any selection in a colour of your choice, with a palette you can redefine.
+* Turn on the marker and everything you select gets highlighted until you turn it off.
+* Hide every highlight and comment with one button, and bring them back with the same one.
 * Attach comments to a highlight and reply to your colleagues, each one attributed to a verified GitHub account.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
@@ -44,6 +46,8 @@ Everything else lives in the command palette under **CodeLight**, in the editor 
 | `codelight.palette` | built in colours | The colours offered in the picker |
 | `codelight.highlightOpacity` | `0.3` | How strong the highlight background is |
 | `codelight.inlineComments` | `preview` | Show the latest comment, a count, or nothing |
+| `codelight.commentGutter` | `always` | Where the comment button appears in the gutter |
+| `codelight.gutterMarks` | `true` | Show a coloured mark in the gutter beside every highlight |
 | `codelight.storage` | `json` | Format used when CodeLight creates the annotation file. An existing file keeps its own format |
 
 The compressed format writes `.vscode/codelight.json.gz`, which is much smaller but is a binary file that git cannot diff or merge. To move an existing store between the two formats, run **CodeLight: Convert Annotation Storage Format**, which writes the new file and removes the old one after you confirm.

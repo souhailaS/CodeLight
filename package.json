@@ -2,7 +2,7 @@
   "name": "codelight",
   "displayName": "CodeLight",
   "description": "Shared highlights and inline comments that live in .vscode",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "media/icon.png",
   "publisher": "souhailaserbout",
@@ -77,7 +77,11 @@
       {
         "command": "codelight.addComment",
         "title": "Comment on Selection",
-        "category": "CodeLight"
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/note-light.svg",
+          "dark": "media/note-dark.svg"
+        }
       },
       {
         "command": "codelight.reply",
@@ -184,6 +188,47 @@
         "title": "Delete Highlight",
         "category": "CodeLight",
         "icon": "$(trash)"
+      },
+      {
+        "command": "codelight.markerOn",
+        "title": "Toggle Marker",
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/mark-light.svg",
+          "dark": "media/mark-dark.svg"
+        }
+      },
+      {
+        "command": "codelight.markerOff",
+        "title": "Turn Off Marker",
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/marker-on-light.svg",
+          "dark": "media/marker-on-dark.svg"
+        }
+      },
+      {
+        "command": "codelight.openWalkthrough",
+        "title": "Open Walkthrough",
+        "category": "CodeLight"
+      },
+      {
+        "command": "codelight.toggleVisibility",
+        "title": "Show or Hide All Notes",
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/eye-light.svg",
+          "dark": "media/eye-dark.svg"
+        }
+      },
+      {
+        "command": "codelight.showAgain",
+        "title": "Show All Notes",
+        "category": "CodeLight",
+        "icon": {
+          "light": "media/eye-off-light.svg",
+          "dark": "media/eye-off-dark.svg"
+        }
       }
     ],
     "keybindings": [
@@ -253,6 +298,14 @@
         {
           "command": "codelight.threadDeleteHighlight",
           "when": "false"
+        },
+        {
+          "command": "codelight.markerOff",
+          "when": "false"
+        },
+        {
+          "command": "codelight.showAgain",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -274,9 +327,29 @@
       ],
       "editor/title": [
         {
-          "command": "codelight.showPanel",
+          "command": "codelight.markerOn",
+          "group": "navigation@7",
+          "when": "resourceLangId && !codelight.marker"
+        },
+        {
+          "command": "codelight.markerOff",
+          "group": "navigation@7",
+          "when": "resourceLangId && codelight.marker"
+        },
+        {
+          "command": "codelight.addComment",
+          "group": "navigation@8",
+          "when": "resourceLangId"
+        },
+        {
+          "command": "codelight.toggleVisibility",
           "group": "navigation@9",
-          "when": "editorIsOpen"
+          "when": "resourceLangId && !codelight.hidden"
+        },
+        {
+          "command": "codelight.showAgain",
+          "group": "navigation@9",
+          "when": "resourceLangId && codelight.hidden"
         }
       ],
       "view/title": [
@@ -467,6 +540,27 @@
           "maximum": 1,
           "description": "Opacity of the highlight background."
         },
+        "codelight.commentGutter": {
+          "type": "string",
+          "default": "always",
+          "enum": [
+            "always",
+            "highlights",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Offer it on every line",
+            "Offer the comment button only on lines that already have a highlight",
+            "Never offer it"
+          ],
+          "description": "Where the comment button appears in the gutter.",
+          "scope": "resource"
+        },
+        "codelight.gutterMarks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a coloured mark in the gutter beside every highlight."
+        },
         "codelight.storage": {
           "type": "string",
           "default": "json",
@@ -506,7 +600,73 @@
           "icon": "media/codelight.svg"
         }
       ]
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "codelight.start",
+        "title": "Start with CodeLight",
+        "description": "Highlights and comments that live beside your code instead of inside it.",
+        "steps": [
+          {
+            "id": "codelight.step.highlight",
+            "title": "Highlight what matters",
+            "description": "Select some text, then run [Highlight Selection](command:codelight.addHighlight) and pick a colour.",
+            "media": {
+              "markdown": "media/walkthrough/highlight.md",
+              "altText": "Highlighting a selection"
+            },
+            "completionEvents": [
+              "onCommand:codelight.addHighlight"
+            ]
+          },
+          {
+            "id": "codelight.step.comment",
+            "title": "Say what you noticed",
+            "description": "Put the cursor in a highlight and run [Comment on Selection](command:codelight.addComment) to open a thread.",
+            "media": {
+              "markdown": "media/walkthrough/comment.md",
+              "altText": "Commenting on a highlight"
+            },
+            "completionEvents": [
+              "onCommand:codelight.addComment"
+            ]
+          },
+          {
+            "id": "codelight.step.panel",
+            "title": "Find every note",
+            "description": "Open the [CodeLight panel](command:codelight.showPanel) to browse, filter and jump to any note.",
+            "media": {
+              "markdown": "media/walkthrough/panel.md",
+              "altText": "The CodeLight panel"
+            },
+            "completionEvents": [
+              "onCommand:codelight.showPanel"
+            ]
+          },
+          {
+            "id": "codelight.step.share",
+            "title": "Share it, or keep it",
+            "description": "Commit `.vscode/codelight.json` to share your notes, or gitignore it to keep them private.",
+            "media": {
+              "markdown": "media/walkthrough/share.md",
+              "altText": "Sharing through git"
+            }
+          }
+        ]
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "codelight.annotations",
+        "contents": "No notes in this project yet.\n\nSelect some code and highlight it, then add a comment to start a thread.\n\n[Highlight Selection](command:codelight.addHighlight)\n\n[Open the walkthrough](command:codelight.openWalkthrough)",
+        "when": "workbenchState != empty && !codelight.filtered"
+      },
+      {
+        "view": "codelight.annotations",
+        "contents": "Open a folder to keep notes with your code. CodeLight stores them in .vscode inside the folder you open.\n\n[Open Folder](command:vscode.openFolder)",
+        "when": "workbenchState == empty"
+      }
+    ]
   },
   "scripts": {
     "compile": "node esbuild.mjs",
