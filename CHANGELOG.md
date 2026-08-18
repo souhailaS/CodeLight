@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1
+
+No change to what CodeLight does. This release exists so the tests that hold the last one in place ship with it.
+
+* The webview that draws the comment cards is now covered by tests that pin the escaping, the content security policy and the messages it accepts back, so a hostile annotation committed to a repository stays inert.
+* The marker, the status bar, the panel and the hover are covered too. Two hundred and eighty eight tests now run on every push.
+
 ## 0.6.0
 
 Fixes for bugs found by reading the extension the way a stranger would, each one reproduced with a test before it was fixed.
