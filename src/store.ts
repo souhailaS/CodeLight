@@ -75,6 +75,9 @@ function isCompressed(target: vscode.Uri): boolean {
 
 async function decodeStore(bytes: Uint8Array, target: vscode.Uri): Promise<string> {
   const buffer = Buffer.from(bytes);
+  if (!isCompressed(target) && buffer.byteLength > MAX_STORE_BYTES) {
+    throw new Error(`The file is larger than the ${LIMIT_MB} MB limit.`);
+  }
   const text = isCompressed(target)
     ? (await decompress(buffer, { maxOutputLength: MAX_STORE_BYTES })).toString("utf8")
     : buffer.toString("utf8");
@@ -100,14 +103,14 @@ async function inspectTarget(target: vscode.Uri): Promise<TargetInfo | undefined
   }
 }
 
-function tooLarge(content: string, target: vscode.Uri): boolean {
-  return isCompressed(target) && Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES;
+function tooLarge(content: string): boolean {
+  return Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES;
 }
 
 async function encodeStore(content: string, target: vscode.Uri): Promise<Buffer> {
-  if (tooLarge(content, target)) {
+  if (tooLarge(content)) {
     throw new Error(
-      `The store is larger than the ${LIMIT_MB} MB limit for compressed storage. Convert it to the plain format with the command Convert Annotation Storage Format.`
+      `The store is larger than the ${LIMIT_MB} MB limit. Remove some annotations before saving again.`
     );
   }
   const buffer = Buffer.from(content, "utf8");
@@ -289,12 +292,6 @@ export class AnnotationStore implements vscode.Disposable {
         );
         return false;
       }
-      if (tooLarge(disk.raw, destination)) {
-        this.reportFailure(
-          `CodeLight could not convert ${source.fsPath}. The store is larger than the ${LIMIT_MB} MB limit for compressed storage, so it is too large to compress.`
-        );
-        return false;
-      }
       try {
         await this.writeStore(destination, disk.raw);
       } catch (error) {
@@ -440,7 +437,14 @@ export class AnnotationStore implements vscode.Disposable {
       }
       const annotations = disk.status === "ok" ? disk.annotations : new Map<string, Annotation>();
       const rejected = disk.status === "ok" ? disk.rejected : [];
+      const stale =
+        disk.status === "ok"
+          ? disk.raw !== this.lastSerialized || this.active?.toString() !== target.toString()
+          : this.annotations.size > 0 || this.lastSerialized !== undefined;
       if (!apply(annotations)) {
+        if (stale) {
+          this.scheduleReload();
+        }
         return false;
       }
       const content = serializeStore([...annotations.values()], rejected);
@@ -738,8 +742,10 @@ export class AnnotationStore implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.generation += 1;
     if (this.reloadTimer) {
       clearTimeout(this.reloadTimer);
+      this.reloadTimer = undefined;
     }
     this.watcher?.dispose();
     this.emitter.dispose();

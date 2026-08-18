@@ -169,6 +169,11 @@ describe("parseStore", () => {
     assert.throws(() => parseStore(wire([], STORE_VERSION + 1)), /format version 2/);
   });
 
+  it("refuses a version that is not a number", () => {
+    assert.throws(() => parseStore('{"version":"1","annotations":[]}'), /not a number/);
+    assert.throws(() => parseStore('{"version":null,"annotations":[]}'), /not a number/);
+  });
+
   it("accepts a file with no version and a file from an older build", () => {
     assert.equal(parseStore('{"annotations":[]}').annotations.length, 0);
     assert.equal(parseStore(wire([], 0)).annotations.length, 0);
