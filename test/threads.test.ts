@@ -231,6 +231,31 @@ describe("deleting a comment another window removed", () => {
   });
 });
 
+describe("where the gutter offers a comment", () => {
+  it("leaves out the trailing empty line it would refuse", async () => {
+    const { view, document } = await build();
+    const provider = controllers[0].commentingRangeProvider as {
+      provideCommentingRanges(document: unknown): Range[];
+    };
+    void view;
+    const ranges = provider.provideCommentingRanges(document);
+    assert.equal(ranges.length, 1);
+    assert.ok(ranges[0].end.line < document.lineCount - 1);
+    assert.ok(document.lineAt(ranges[0].end.line).range.isEmpty === false);
+  });
+
+  it("offers nothing at all for an empty file", async () => {
+    const { store, view } = await build();
+    void store;
+    void view;
+    const empty = new TextDocument(Uri.file(nodePath.join(root, "src/empty.ts")), "");
+    const provider = controllers[0].commentingRangeProvider as {
+      provideCommentingRanges(document: unknown): Range[];
+    };
+    assert.deepEqual(provider.provideCommentingRanges(empty), []);
+  });
+});
+
 describe("a gutter comment on a trailing empty line", () => {
   it("refuses rather than saving a note with nothing to hold on to", async () => {
     const { store, view, document } = await build();

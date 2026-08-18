@@ -212,10 +212,14 @@ export class ThemeIcon {
 }
 
 export class MarkdownString {
-  value = "";
+  value: string;
   isTrusted = false;
   supportHtml = false;
   supportThemeIcons = false;
+
+  constructor(value = "") {
+    this.value = value;
+  }
   appendMarkdown(value: string): MarkdownString {
     this.value += value;
     return this;

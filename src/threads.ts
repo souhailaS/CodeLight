@@ -49,7 +49,6 @@ export class ThreadView implements vscode.Disposable {
   private readonly owners = new Map<vscode.CommentThread, string>();
   private readonly drafts = new Set<string>();
   private readonly lost: string[] = [];
-  private warnedHiddenEdit = false;
   private lostTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number; length: number }>();
   private readonly disposables: vscode.Disposable[] = [];
@@ -103,7 +102,11 @@ export class ThreadView implements vscode.Disposable {
           return [];
         }
         if (mode === "always") {
-          return [new vscode.Range(0, 0, document.lineCount - 1, 0)];
+          let last = document.lineCount - 1;
+          while (last > 0 && document.lineAt(last).range.isEmpty) {
+            last -= 1;
+          }
+          return document.lineAt(last).range.isEmpty ? [] : [new vscode.Range(0, 0, last, 0)];
         }
         const spans = this.live.spansFor(document);
         const lines = new Set<number>();
@@ -276,7 +279,7 @@ export class ThreadView implements vscode.Disposable {
     const rescued = await rescue(pending.join("\n\n"));
     const many = rescued && pending.length > 1 ? ` All ${pending.length} were kept together.` : "";
     void vscode.window.showWarningMessage(
-      withRescue("A comment you were editing was removed from the shared file.", rescued) + many
+      withRescue("A comment you were editing was closed before it was saved.", rescued) + many
     );
   }
 
@@ -410,7 +413,7 @@ export class ThreadView implements vscode.Disposable {
     const annotation = this.store.byId(comment.annotationId);
     const thread = this.threads.get(comment.annotationId);
     if (!annotation) {
-      void vscode.window.showWarningMessage("That comment is no longer in the shared file.");
+      void vscode.window.showWarningMessage("That highlight is no longer in the shared file.");
       await this.store.refresh();
       return;
     }
@@ -830,9 +833,6 @@ export class ThreadView implements vscode.Disposable {
       if (!wanted.has(id)) {
         for (const entry of thread.comments) {
           if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
-            if (hidden) {
-              this.warnedHiddenEdit = true;
-            }
             this.collectLostEdit(entry);
           }
         }
@@ -849,12 +849,6 @@ export class ThreadView implements vscode.Disposable {
       if (!annotation || annotation.comments.length > 0 || annotation.orphaned === true) {
         this.drafts.delete(id);
       }
-    }
-    if (this.warnedHiddenEdit) {
-      this.warnedHiddenEdit = false;
-      void vscode.window.showWarningMessage(
-        "A comment you were editing was closed with the notes. The edit was not kept."
-      );
     }
     for (const [id, entry] of wanted) {
       const existing = this.threads.get(id) ?? this.attach(entry.document, entry.annotation);
