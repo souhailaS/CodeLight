@@ -208,7 +208,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
       }
-      const root = await store.pickFolder();
+      const root = await store.pickFolder("Pick the folder to keep out of git");
       if (root) {
         await keepPrivate(root);
       }
@@ -219,7 +219,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
       }
-      const root = await store.pickFolder();
+      const root = await store.pickFolder("Pick the folder to take out of .gitignore");
       if (root) {
         await stopKeepingPrivate(root);
       }

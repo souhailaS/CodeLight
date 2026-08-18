@@ -23,15 +23,15 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 ## What it does
 
 * Highlight any selection in a colour of your choice, with a palette you can redefine.
-* Turn on the marker and each new selection gets highlighted until you turn it off. Text that is already highlighted is left as it is.
+* Turn on the marker and each selection gets highlighted until you turn it off. Select one of your own uncommented highlights exactly and it changes colour instead.
 * Hide every highlight and comment with one button, and bring them back with the same one.
-* Attach comments to a highlight and reply to your colleagues, each one signed with the GitHub account that was signed in when it was written.
+* Attach comments to a highlight and reply to your colleagues, each one labelled with the GitHub account that was signed in when it was written.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
 * Give every folder of a multi root workspace its own annotation file, so notes follow the folder they belong to.
-* Keep everything in the CodeLight file in `.vscode`, so annotations travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.
+* Keep the notes of each folder in one file under `.vscode`, so they travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.
 
-Two commands decide whether the notes travel. **Keep the Notes Out of Git** adds the annotation file to `.gitignore`, and **Let the Notes Go Into Git** takes it back out.
+Two commands decide whether the notes travel. **Keep the Notes Out of Git** adds the annotation file to `.gitignore`, and **Take the Notes Out of .gitignore** removes that entry again.
 
 Highlights follow your edits. Insert lines above one and it moves with the text. Delete the text it marks and CodeLight looks for it elsewhere in the file before giving up, and if the text comes back the highlight returns with it.
 

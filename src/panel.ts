@@ -364,12 +364,19 @@ export class PanelCommands {
       return;
     }
     const comments = orphans.reduce((sum, entry) => sum + entry.comments.length, 0);
-    const scope = this.tree.activeFilter === undefined ? "" : "The colour filter does not apply here. ";
     const detail =
       comments === 0
-        ? `${scope}Delete ${countLabel(orphans.length, "orphaned highlight")} from every folder of this workspace?`
-        : `${scope}Delete ${countLabel(orphans.length, "orphaned highlight")} and ${countLabel(comments, "comment")} from every folder of this workspace?`;
-    const confirmed = await vscode.window.showWarningMessage(detail, { modal: true }, "Delete");
+        ? `Delete ${countLabel(orphans.length, "orphaned highlight")}?`
+        : `Delete ${countLabel(orphans.length, "orphaned highlight")} and ${countLabel(comments, "comment")}?`;
+    const scope =
+      this.tree.activeFilter === undefined
+        ? "This covers every folder of the workspace."
+        : "This covers every folder of the workspace. The colour filter does not narrow it.";
+    const confirmed = await vscode.window.showWarningMessage(
+      detail,
+      { modal: true, detail: scope },
+      "Delete"
+    );
     if (confirmed !== "Delete") {
       return;
     }

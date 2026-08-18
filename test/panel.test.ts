@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  details,
   messages,
   queueAnswer,
   resetFake,
@@ -309,6 +310,21 @@ describe("deleting from the panel", () => {
     );
   });
 
+  it("keeps the caveat out of a modal that has no filter on", async () => {
+    const { store, commands } = await panel();
+    const gone = annotation("one", "src/a.ts");
+    gone.orphaned = true;
+    assert.ok(await store.add(gone));
+    details.length = 0;
+    queueAnswer("Delete");
+    await commands.deleteOrphansEverywhere();
+    assert.ok(details.some((line) => line.includes("every folder of the workspace")));
+    assert.equal(
+      details.some((line) => line.includes("colour filter")),
+      false
+    );
+  });
+
   it("says the colour filter does not narrow the clearing", async () => {
     const { store, tree, commands } = await panel();
     const gone = annotation("one", "src/a.ts", "yellow");
@@ -318,11 +334,11 @@ describe("deleting from the panel", () => {
     assert.ok(await store.add(gone));
     assert.ok(await store.add(other));
     tree.setFilter("yellow");
-    messages.length = 0;
+    details.length = 0;
     queueAnswer("Delete");
     await commands.deleteOrphansEverywhere();
-    assert.ok(messages.some((line) => line.includes("colour filter does not apply")));
-    assert.ok(messages.some((line) => line.includes("every folder of this workspace")));
+    assert.ok(details.some((line) => line.includes("colour filter does not narrow it")));
+    assert.ok(details.some((line) => line.includes("every folder of the workspace")));
     assert.deepEqual(store.all, []);
   });
 

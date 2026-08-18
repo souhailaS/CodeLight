@@ -134,7 +134,7 @@ export async function stopKeepingPrivate(root: vscode.Uri): Promise<void> {
   }
   if (!ignore.lines.some(isEntry)) {
     void vscode.window.showInformationMessage(
-      `Nothing in ${ignore.uri.fsPath} names the CodeLight notes. Another rule such as .vscode/* can still keep them out, so check git check-ignore if they do not show up.`
+      `Nothing names the CodeLight notes in ${ignore.uri.fsPath}. Another rule such as .vscode/* can still keep them out, so check git check-ignore if they do not show up.`
     );
     return;
   }

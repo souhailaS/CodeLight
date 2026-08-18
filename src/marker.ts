@@ -81,7 +81,7 @@ export class MarkerMode implements vscode.Disposable {
     this.color = picked;
     this.breakChain();
     this.status.text = `$(edit) Marker ${picked.label}`;
-    this.status.tooltip = "CodeLight marker is on. Select text that is not highlighted yet and it gets marked. Click to turn off.";
+    this.status.tooltip = "CodeLight marker is on. Each selection gets marked, and reselecting one of your own uncommented highlights changes its colour. Click to turn off.";
     this.status.show();
     void vscode.commands.executeCommand("setContext", "codelight.marker", true);
   }
