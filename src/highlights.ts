@@ -181,8 +181,12 @@ export class HighlightCommands {
       return [];
     }
     const position = editor.selection.active;
-    const spans = this.live.spansFor(editor.document);
+    const placed = this.live.placedIn(editor.document);
+    const spans = placed.spans;
     return this.store.forFile(editor.document.uri).filter((annotation) => {
+      if (placed.detached.has(annotation.id)) {
+        return false;
+      }
       if (annotation.orphaned === true) {
         return annotation.range.startLine === position.line;
       }
@@ -192,10 +196,11 @@ export class HighlightCommands {
   }
 
   markedRanges(editor: vscode.TextEditor): vscode.Range[] {
-    const spans = this.live.spansFor(editor.document);
+    const placed = this.live.placedIn(editor.document);
+    const spans = placed.spans;
     const taken: vscode.Range[] = [];
     for (const annotation of this.store.forFile(editor.document.uri)) {
-      if (annotation.orphaned === true) {
+      if (annotation.orphaned === true || placed.detached.has(annotation.id)) {
         continue;
       }
       taken.push(this.live.rangeFor(editor.document, annotation, spans));
@@ -231,9 +236,10 @@ export class HighlightCommands {
     if (!editor) {
       return [];
     }
-    const spans = this.live.spansFor(editor.document);
+    const placed = this.live.placedIn(editor.document);
+    const spans = placed.spans;
     return this.store.forFile(editor.document.uri).filter((annotation) => {
-      if (annotation.orphaned === true) {
+      if (annotation.orphaned === true || placed.detached.has(annotation.id)) {
         return false;
       }
       const range = this.live.rangeFor(editor.document, annotation, spans);

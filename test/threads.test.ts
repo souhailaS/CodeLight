@@ -216,6 +216,38 @@ describe("saveEdit", () => {
   });
 });
 
+describe("a note this version of the file cannot hold", () => {
+  it("refuses to open a thread rather than parking it on the wrong line", async () => {
+    const { store, view, document } = await build();
+    writeStore([annotation("a1", [comment("c1", "first note")])]);
+    await store.refresh();
+    const rewritten = new TextDocument(document.uri, "let nothing = here;\nlet other = two;\n");
+    workspace.textDocuments = [rewritten];
+    messages.length = 0;
+    await view.open("a1");
+    assert.ok(warnings().some((line) => line.includes("cannot find the text")), messages.join("\n"));
+    assert.equal(
+      threadsOf().some((entry) => entry.contextValue === "draft"),
+      false
+    );
+  });
+
+  it("keeps its comment thread off the gutter of unrelated code", async () => {
+    const { store, visibility, document } = await build();
+    writeStore([annotation("a1", [comment("c1", "first note")])]);
+    await store.refresh();
+    assert.ok(threadsOf().filter((entry) => !entry.disposed).length > 0);
+    const rewritten = new TextDocument(document.uri, "let nothing = here;\nlet other = two;\n");
+    workspace.textDocuments = [rewritten];
+    visibility.toggle();
+    visibility.toggle();
+    assert.deepEqual(
+      threadsOf().filter((entry) => !entry.disposed),
+      []
+    );
+  });
+});
+
 describe("deleting a comment another window removed", () => {
   it("says so rather than doing nothing", async () => {
     const { store, view } = await build();

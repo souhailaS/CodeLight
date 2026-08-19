@@ -16,6 +16,7 @@ interface Card {
   label: string;
   line: number;
   orphaned: boolean;
+  detached: boolean;
   comments: Comment[];
 }
 
@@ -214,10 +215,10 @@ function renderComment(comment: Comment): string {
 
 function renderCard(card: Card): string {
   const dot =
-    card.hex === undefined || card.orphaned
+    card.hex === undefined || card.orphaned || card.detached
       ? `<span class="dot"></span>`
       : `<span class="dot" style="background: ${escapeHtml(card.hex)}"></span>`;
-  const classes = card.orphaned ? "card orphan" : "card";
+  const classes = card.orphaned || card.detached ? "card orphan" : "card";
   return [
     `<div class="${classes}" role="button" tabindex="0" data-id="${escapeHtml(card.id)}">`,
     `<div class="head">`,
@@ -231,7 +232,10 @@ function renderCard(card: Card): string {
 }
 
 function lineLabel(card: Card): string {
-  return card.orphaned ? "text deleted" : `Line ${card.line}`;
+  if (card.orphaned) {
+    return "text deleted";
+  }
+  return card.detached ? "not in this version" : `Line ${card.line}`;
 }
 
 export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -407,6 +411,8 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       .forFile(document.uri)
       .filter((annotation) => annotation.comments.length > 0);
     const spans = annotations.length > 0 ? this.spansFor(document) : undefined;
+    const detached =
+      annotations.length > 0 ? this.live.placedIn(document).detached : new Set<string>();
     const cards = annotations
       .map((annotation) => ({
         annotation,
@@ -419,6 +425,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
         label: snippet(annotation),
         line: range.start.line + 1,
         orphaned: annotation.orphaned === true,
+        detached: detached.has(annotation.id),
         comments: annotation.comments
       }));
     return { file: relative, cards };

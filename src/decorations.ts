@@ -73,7 +73,12 @@ export class HighlightRenderer implements vscode.Disposable {
   render(editor: vscode.TextEditor): void {
     const style = this.styleFor(this.store.rootFor(editor.document.uri));
     const annotations = this.visibility.visible ? this.store.forFile(editor.document.uri) : [];
-    const spans = annotations.length > 0 ? this.live.spansFor(editor.document) : undefined;
+    const placed =
+      annotations.length > 0
+        ? this.live.placedIn(editor.document)
+        : { spans: undefined, detached: new Set<string>() };
+    const spans = placed.spans;
+    const detached = placed.detached;
     const grouped = new Map<string, vscode.DecorationOptions[]>();
     for (const key of style.types.keys()) {
       grouped.set(key, []);
@@ -84,7 +89,7 @@ export class HighlightRenderer implements vscode.Disposable {
       marks.set(key, []);
     }
     for (const annotation of annotations) {
-      if (annotation.orphaned === true) {
+      if (annotation.orphaned === true || detached.has(annotation.id)) {
         continue;
       }
       const key = style.types.has(annotation.color)

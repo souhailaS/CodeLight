@@ -64,11 +64,23 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
   private readonly emitter = new vscode.EventEmitter<Node | undefined>();
   private readonly disposables: vscode.Disposable[] = [];
   private filter: string | undefined;
+  private detached = new Map<string, ReadonlySet<string>>();
 
   readonly onDidChangeTreeData = this.emitter.event;
 
-  constructor(private readonly store: AnnotationStore) {
-    this.disposables.push(store.onDidChange(() => this.emitter.fire(undefined)));
+  constructor(
+    private readonly store: AnnotationStore,
+    private readonly live: LiveRanges
+  ) {
+    this.disposables.push(
+      store.onDidChange(() => {
+        this.detached = new Map();
+        this.emitter.fire(undefined);
+      }),
+      live.onDidShift(() => {
+        this.detached = new Map();
+      })
+    );
   }
 
   get activeFilter(): string | undefined {
@@ -83,6 +95,7 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
 
   getChildren(node?: Node): Node[] {
     if (!node) {
+      this.detached = new Map();
       return this.files();
     }
     if (node.kind === "file") {
@@ -125,6 +138,8 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       }
       if (annotation.orphaned === true) {
         parts.push("text deleted");
+      } else if (this.isDetached(annotation)) {
+        parts.push("not in this version");
       }
       item.description = parts.join(", ");
       item.contextValue = annotation.orphaned === true ? "codelight.orphan" : "codelight.annotation";
@@ -152,6 +167,23 @@ export class AnnotationTree implements vscode.TreeDataProvider<Node> {
       arguments: [node.annotation.id]
     };
     return item;
+  }
+
+  private isDetached(annotation: Annotation): boolean {
+    const uri = this.store.uriFor(annotation);
+    if (!uri) {
+      return false;
+    }
+    const known = this.detached.get(uri.toString());
+    if (known) {
+      return known.has(annotation.id);
+    }
+    const document = vscode.workspace.textDocuments.find(
+      (entry) => entry.uri.toString() === uri.toString()
+    );
+    const found = document ? this.live.detachedIn(document) : new Set<string>();
+    this.detached.set(uri.toString(), found);
+    return found.has(annotation.id);
   }
 
   private files(): FileNode[] {
@@ -226,6 +258,12 @@ export class PanelCommands {
     }
     try {
       const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+      if (this.live.detachedIn(document).has(annotationId)) {
+        void vscode.window.showWarningMessage(
+          "CodeLight cannot find the text that highlight marks in this version of the file, so it opened the file without jumping."
+        );
+        return;
+      }
       const range = this.live.rangeFor(document, annotation);
       editor.selection = new vscode.Selection(range.start, range.end);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);

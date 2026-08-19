@@ -28,7 +28,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = new FileStatus(store, visibility, sharing);
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity, visibility);
-  const tree = new AnnotationTree(store);
+  const tree = new AnnotationTree(store, live);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
     treeDataProvider: tree,

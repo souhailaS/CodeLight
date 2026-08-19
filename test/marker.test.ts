@@ -475,6 +475,34 @@ describe("two marks that could overlap", () => {
   });
 });
 
+describe("what the marker does about a note it cannot place", () => {
+  it("marks the selection rather than recolouring a note from another version", async () => {
+    const { store, marker, editor, document } = await rig();
+    assert.ok(
+      await store.add({
+        id: "elsewhere",
+        file: "src/a.ts",
+        range: { startLine: 0, startCharacter: 6, endLine: 0, endCharacter: 11 },
+        anchor: { text: "notHere", before: "nor ", after: " either" },
+        color: "green",
+        author: { login: "ada", id: "42" },
+        createdAt: "t",
+        updatedAt: "t",
+        comments: [],
+        root: Uri.file(root).toString()
+      })
+    );
+    await turnOn(marker);
+    drive(editor, [select(document, 6, 11)]);
+    await reach(store, [
+      ["notHere", "green", 0],
+      ["total", "yellow", 0]
+    ]);
+    assert.equal(store.byId("elsewhere")?.color, "green");
+    assert.ok(store.all.some((entry) => entry.anchor.text === "total"));
+  });
+});
+
 describe("turning the marker off", () => {
   it("stops when the notes are hidden", async () => {
     const { marker } = await rig();

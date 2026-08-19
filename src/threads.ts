@@ -108,10 +108,11 @@ export class ThreadView implements vscode.Disposable {
           }
           return document.lineAt(last).range.isEmpty ? [] : [new vscode.Range(0, 0, last, 0)];
         }
-        const spans = this.live.spansFor(document);
+        const placed = this.live.placedIn(document);
+        const spans = placed.spans;
         const lines = new Set<number>();
         for (const annotation of this.store.forFile(document.uri)) {
-          if (annotation.orphaned === true) {
+          if (annotation.orphaned === true || placed.detached.has(annotation.id)) {
             continue;
           }
           const range = this.live.rangeFor(document, annotation, spans);
@@ -549,6 +550,12 @@ export class ThreadView implements vscode.Disposable {
       void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
       return;
     }
+    if (this.live.detachedIn(document).has(annotationId)) {
+      void vscode.window.showWarningMessage(
+        "CodeLight cannot find the text that highlight marks in this version of the file, so it will not guess where to put the thread."
+      );
+      return;
+    }
     if (this.live.rangeFor(document, annotation).isEmpty) {
       void vscode.window.showWarningMessage(
         "That highlight lost its text. Remove it instead of commenting on it."
@@ -561,6 +568,7 @@ export class ThreadView implements vscode.Disposable {
     this.sync();
     const thread = this.threads.get(annotationId);
     if (!thread) {
+      this.drafts.delete(annotationId);
       void vscode.window.showWarningMessage("CodeLight could not open that thread.");
       return;
     }
@@ -813,8 +821,9 @@ export class ThreadView implements vscode.Disposable {
         if (this.store.relative(document.uri) === undefined) {
           continue;
         }
+        const detached = this.live.detachedIn(document);
         for (const annotation of this.store.forFile(document.uri)) {
-          if (annotation.orphaned === true) {
+          if (annotation.orphaned === true || detached.has(annotation.id)) {
             continue;
           }
           if (annotation.comments.length > 0 || this.drafts.has(annotation.id)) {
