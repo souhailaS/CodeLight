@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { filesRenamed, resetFake, Uri, workspace } from "./fakevscode";
+import { filesRenamed, resetFake, Uri, warnings, workspace } from "./fakevscode";
 import { Annotation } from "../src/model";
 import { RenameWatcher } from "../src/renames";
 import { AnnotationStore } from "../src/store";
@@ -32,6 +32,17 @@ async function rig(): Promise<{ store: AnnotationStore; watcher: RenameWatcher }
   const watcher = new RenameWatcher(store);
   closing.push(watcher, store);
   return { store, watcher };
+}
+
+function second(): string {
+  const other = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-other-"));
+  fs.mkdirSync(nodePath.join(other, ".vscode"));
+  workspace.workspaceFolders = [
+    { uri: Uri.file(root), name: "root", index: 0 },
+    { uri: Uri.file(other), name: "other", index: 1 }
+  ];
+  closing.push({ dispose: () => fs.rmSync(other, { recursive: true, force: true }) });
+  return other;
 }
 
 function at(...parts: string[]): Uri {
@@ -193,5 +204,130 @@ describe("notes after a rename", () => {
     assert.equal(store.byId("one")?.file, "src/c.ts");
     assert.equal(store.byId("two")?.file, "src/a.ts");
     fs.rmSync(second, { recursive: true, force: true });
+  });
+});
+
+describe("renames that are not a plain move inside one folder", () => {
+  it("hands a note to the folder the file moved into", async () => {
+    const other = second();
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.equal(
+      await watcher.follow([
+        { oldUri: at("src/a.ts"), newUri: Uri.file(nodePath.join(other, "src/a.ts")) }
+      ]),
+      1
+    );
+    const moved = store.byId("one");
+    assert.equal(moved?.file, "src/a.ts");
+    assert.equal(moved?.root, Uri.file(other).toString());
+    assert.deepEqual(
+      store.folders.map((folder) => [folder.key, folder.all.length]),
+      [
+        [Uri.file(root).toString(), 0],
+        [Uri.file(other).toString(), 1]
+      ]
+    );
+  });
+
+  it("keeps a note that left the workspace and says it stayed behind", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.equal(
+      await watcher.follow([{ oldUri: at("src/a.ts"), newUri: Uri.file("/elsewhere/a.ts") }]),
+      0
+    );
+    assert.equal(store.byId("one")?.file, "src/a.ts");
+    assert.ok(warnings().some((line) => line.includes("out of this workspace")), warnings().join("|"));
+  });
+
+  it("resolves a folder rename and a rename inside it in one batch", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/a.ts")));
+    await watcher.follow([
+      { oldUri: at("src"), newUri: at("lib") },
+      { oldUri: at("src/a.ts"), newUri: at("src/b.ts") }
+    ]);
+    assert.equal(store.byId("one")?.file, "lib/b.ts");
+  });
+
+  it("resolves the same batch whichever order it arrives in", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    await watcher.follow([
+      { oldUri: at("src/a.ts"), newUri: at("src/b.ts") },
+      { oldUri: at("src"), newUri: at("lib") }
+    ]);
+    assert.equal(store.byId("one")?.file, "lib/b.ts");
+  });
+
+  it("applies two events in the order they arrived", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    const first = watcher.follow([{ oldUri: at("src"), newUri: at("lib") }]);
+    const next = watcher.follow([{ oldUri: at("lib"), newUri: at("out") }]);
+    await Promise.all([first, next]);
+    assert.equal(store.byId("one")?.file, "out/a.ts");
+  });
+
+  it("strands the notes on a file a rename wrote over", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/b.ts")));
+    assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/b.ts") }]), 1);
+    assert.equal(store.byId("one")?.file, "src/b.ts");
+    assert.equal(store.byId("one")?.orphaned, undefined);
+    assert.equal(store.byId("two")?.orphaned, true);
+  });
+
+  it("says the notes stayed put when the annotation file cannot be written", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      ["<<<<<<< HEAD", "{}", "=======", "{}", ">>>>>>> branch"].join("\n")
+    );
+    assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/c.ts") }]), 0);
+    assert.equal(store.byId("one")?.file, "src/a.ts");
+    assert.ok(
+      warnings().some((line) => line.includes("still point at the old path")),
+      warnings().join("|")
+    );
+  });
+
+  it("waits for the store to be read before it follows anything", async () => {
+    const { root: _root, ...wire } = annotation("one", "src/a.ts");
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      `${JSON.stringify({ version: 1, annotations: [wire] }, null, 2)}\n`
+    );
+    const store = new AnnotationStore();
+    const ready = store.initialize();
+    const watcher = new RenameWatcher(store, ready);
+    closing.push(watcher, store);
+    const following = watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/c.ts") }]);
+    await ready;
+    assert.equal(await following, 1);
+    assert.equal(store.byId("one")?.file, "src/c.ts");
+  });
+
+  it(
+    "follows a folder whose notes spell the path in another case",
+    { skip: process.platform !== "darwin" && process.platform !== "win32" },
+    async () => {
+      const { store, watcher } = await rig();
+      assert.ok(await store.add(annotation("one", "SRC/a.ts")));
+      assert.equal(await watcher.follow([{ oldUri: at("src"), newUri: at("lib") }]), 1);
+      assert.equal(store.byId("one")?.file, "lib/a.ts");
+    }
+  );
+
+  it("writes nothing when the name did not really change", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    const before = fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8");
+    assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/a.ts") }]), 0);
+    assert.equal(fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8"), before);
   });
 });

@@ -20,7 +20,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
   const store = new AnnotationStore();
   const live = new LiveRanges(store);
-  const renames = new RenameWatcher(store);
   const visibility = new Visibility();
   const renderer = new HighlightRenderer(store, live, visibility);
   useSwatches(new Swatches(context.globalStorageUri));
@@ -38,6 +37,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const fileComments = new FileCommentsView(store, live, sharing);
   const ready = store.initialize().catch(() => undefined);
+  const renames = new RenameWatcher(store, ready);
   void ready.then(() => fileComments.ready());
   void identity.refresh().catch(() => undefined);
 
