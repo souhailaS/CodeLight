@@ -5,13 +5,26 @@ import { AnnotationStore } from "./store";
 
 export class SignInNudge {
   private asked = false;
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly store: AnnotationStore,
     private readonly sharing: SharingState
   ) {}
 
-  async about(target: vscode.Uri, author: Identity): Promise<void> {
+  about(target: vscode.Uri, author: Identity): Promise<void> {
+    const next = this.queue.then(
+      () => this.consider(target, author),
+      () => this.consider(target, author)
+    );
+    this.queue = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
+  }
+
+  private async consider(target: vscode.Uri, author: Identity): Promise<void> {
     if (author.verified || this.asked) {
       return;
     }

@@ -56,9 +56,7 @@ export function sourceOf(who: Identity): string {
   if (who.source === "github") {
     return "the GitHub account you signed in with";
   }
-  return who.source === "git"
-    ? "the name git knows you by"
-    : "the account name on this machine, since git knows you by no other";
+  return who.source === "git" ? "the name git knows you by" : "the account name on this machine";
 }
 
 export function localId(seed: string): string {
@@ -75,6 +73,7 @@ export class IdentityProvider implements vscode.Disposable {
 
   private pending: Promise<Identity> | undefined;
   private generation = 0;
+  private readonly seen = new Set<string>();
 
   constructor(
     private readonly ask: Asker = askGit,
@@ -85,6 +84,7 @@ export class IdentityProvider implements vscode.Disposable {
         if (event.provider.id !== PROVIDER) {
           return;
         }
+        this.generation += 1;
         void this.refresh();
       })
     );
@@ -122,6 +122,9 @@ export class IdentityProvider implements vscode.Disposable {
 
   private adopt(next: Identity | undefined): Identity | undefined {
     const changed = next?.id !== this.current?.id || next?.login !== this.current?.login;
+    if (next) {
+      this.seen.add(next.id);
+    }
     this.current = next;
     if (changed) {
       this.emitter.fire(next);
@@ -154,7 +157,7 @@ export class IdentityProvider implements vscode.Disposable {
   }
 
   owns(author: Author): boolean {
-    return author.id === this.current?.id || author.id === this.mine?.id;
+    return this.seen.has(author.id);
   }
 
   private async resolveLocal(): Promise<Identity> {
@@ -184,6 +187,7 @@ export class IdentityProvider implements vscode.Disposable {
 
   private keep(mine: Identity): Identity {
     this.mine = mine;
+    this.seen.add(mine.id);
     if (!this.current) {
       this.adopt(mine);
     }
@@ -216,14 +220,19 @@ export class IdentityProvider implements vscode.Disposable {
       return here;
     }
     const fresh = randomUUID();
+    const writing = this.memory.update(INSTALLATION, fresh).then(
+      () => true,
+      () => false
+    );
     const kept = await Promise.race([
-      this.memory.update(INSTALLATION, fresh).then(
-        () => true,
-        () => false
-      ),
+      writing,
       new Promise<boolean>((done) => setTimeout(() => done(false), 1000))
     ]);
-    return kept ? fresh : here;
+    if (kept) {
+      return fresh;
+    }
+    void writing.then(() => this.memory?.update(INSTALLATION, here).then(undefined, () => undefined));
+    return here;
   }
 
   dispose(): void {

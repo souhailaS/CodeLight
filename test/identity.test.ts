@@ -1,7 +1,7 @@
 import * as assert from "node:assert/strict";
 import * as os from "node:os";
 import { beforeEach, describe, it } from "node:test";
-import { authentication, messages, resetFake, Uri, workspace } from "./fakevscode";
+import { authentication, messages, resetFake, sessionsChanged, Uri, workspace } from "./fakevscode";
 import { IdentityProvider, localId, Remembers, sourceOf } from "../src/identity";
 
 function provider(answers: Record<string, string | undefined>): IdentityProvider {
@@ -212,6 +212,54 @@ describe("who a note is signed by", () => {
     assert.equal(who.source, "machine");
     assert.equal(sourceOf(who).includes("machine"), true);
     assert.equal(sourceOf({ ...who, source: "git" }).includes("git knows"), true);
+  });
+
+  it("does not put a session back after the user signed out", async () => {
+    const who = provider({ "user.email": "ada@b.c" });
+    authentication.session = { account: { label: "ada", id: "42" }, accessToken: "t" };
+    await who.prime();
+    assert.equal(who.identity?.id, "42");
+    authentication.delayMs = 20;
+    const quiet = who.refresh();
+    authentication.delayMs = 0;
+    authentication.session = undefined;
+    sessionsChanged.fire({ provider: { id: "github" } });
+    await new Promise((done) => setTimeout(done, 40));
+    await quiet;
+    assert.equal(who.identity?.id, localId("ada@b.c"));
+    assert.equal(who.identity?.verified, false);
+  });
+
+  it("keeps your github notes yours after you sign out", async () => {
+    const who = provider({ "user.email": "ada@b.c" });
+    authentication.session = { account: { label: "ada", id: "42" }, accessToken: "t" };
+    await who.prime();
+    authentication.session = undefined;
+    await who.refresh();
+    assert.equal(who.owns({ login: "ada", id: "42" }), true);
+    assert.equal(who.owns({ login: "ada@b.c", id: localId("ada@b.c") }), true);
+    assert.equal(who.owns({ login: "bob", id: "99" }), false);
+  });
+
+  it("settles on one id when the write of a fresh one lands late", async () => {
+    const held = new Map<string, unknown>();
+    const slow: Remembers = {
+      get<T>(key: string): T | undefined {
+        return held.get(key) as T | undefined;
+      },
+      update(key: string, value: unknown) {
+        return new Promise<void>((done) =>
+          setTimeout(() => {
+            held.set(key, value);
+            done();
+          }, 1100)
+        );
+      }
+    };
+    const one = await new IdentityProvider(async () => undefined, slow).require();
+    await new Promise((done) => setTimeout(done, 1400));
+    const other = await new IdentityProvider(async () => undefined, slow).require();
+    assert.equal(one.id, other.id);
   });
 
   it("keeps no avatar for a local name", async () => {

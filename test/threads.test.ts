@@ -26,6 +26,8 @@ import { LiveRanges } from "../src/live";
 import { AnnotationStore } from "../src/store";
 import { Visibility } from "../src/visibility";
 import { IdentityProvider, localId } from "../src/identity";
+import { SignInNudge } from "../src/nudge";
+import { SharingState } from "../src/sharing";
 import { ThreadComment, ThreadView } from "../src/threads";
 
 let root = "";
@@ -78,6 +80,7 @@ async function build(): Promise<{
   identity: IdentityProvider;
   visibility: Visibility;
   view: ThreadView;
+  asked: string[];
   document: TextDocument;
   editor: { document: TextDocument; selection: Selection; selections: Selection[] };
 }> {
@@ -89,7 +92,17 @@ async function build(): Promise<{
   const visibility = new Visibility();
   const document = new TextDocument(Uri.file(nodePath.join(root, "src/a.ts")), SOURCE);
   workspace.textDocuments = [document];
-  const view = new ThreadView(store, live, identity, visibility);
+  const asked: string[] = [];
+  const sharing = new SharingState(() => Promise.resolve(1));
+  const nudge = new SignInNudge(store, sharing);
+  (nudge as unknown as { about: (target: Uri, author: { login: string }) => Promise<void> }).about = (
+    target,
+    author
+  ) => {
+    asked.push(`${author.login} ${target.path}`);
+    return Promise.resolve();
+  };
+  const view = new ThreadView(store, live, identity, visibility, sharing, nudge);
   const editor = {
     document,
     selection: new Selection(new Position(0, 0), new Position(0, 0)),
@@ -97,7 +110,7 @@ async function build(): Promise<{
   };
   window.activeTextEditor = editor;
   opened.push(view, live, visibility, identity, store);
-  return { store, live, identity, visibility, view, document, editor };
+  return { store, live, identity, visibility, view, document, editor, asked };
 }
 
 function threadsOf(): FakeCommentThread[] {
@@ -213,6 +226,29 @@ describe("saveEdit", () => {
     }
     assert.equal(store.byId("a1")?.comments[0].body, "first note");
     assert.equal(clipboard.text, "the edited text");
+  });
+});
+
+describe("telling the writer their name is not verified", () => {
+  it("mentions it once a highlight is written from the gutter", async () => {
+    authentication.session = undefined;
+    const { view, editor, asked, store } = await build();
+    editor.selection = new Selection(new Position(0, 0), new Position(0, 5));
+    await view.openDraft(editor as never);
+    const draft = threadsOf()[0];
+    await view.highlightOnly({ thread: draft, text: "" } as never);
+    assert.equal(store.all.length, 1);
+    assert.equal(asked.length, 1, asked.join("|"));
+  });
+
+  it("mentions it once a comment is written", async () => {
+    authentication.session = undefined;
+    const { view, editor, asked } = await build();
+    editor.selection = new Selection(new Position(0, 0), new Position(0, 5));
+    await view.openDraft(editor as never);
+    const draft = threadsOf()[0];
+    await view.reply({ thread: draft, text: "a first note" } as never);
+    assert.equal(asked.length, 1, asked.join("|"));
   });
 });
 

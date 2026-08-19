@@ -591,6 +591,9 @@ export class ThreadView implements vscode.Disposable {
       login: author.login,
       id: author.id
     });
+    if (created !== undefined) {
+      void this.nudge.about(thread.uri, author);
+    }
     if (typed === "") {
       return;
     }

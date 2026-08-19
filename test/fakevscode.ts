@@ -700,10 +700,12 @@ export const authentication = {
     }
     return options?.createIfNone === true ? authentication.session : answer;
   },
-  onDidChangeSessions() {
-    return { dispose: () => undefined };
+  onDidChangeSessions(listener: (event: { provider: { id: string } }) => void) {
+    return sessionsChanged.event(listener);
   }
 };
+
+export const sessionsChanged = new EventEmitter<{ provider: { id: string } }>();
 
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: Uri; name: string; index: number }>,

@@ -84,6 +84,12 @@ describe("telling someone their name is not verified", () => {
     assert.equal(said().length, 1);
   });
 
+  it("says it once even when two notes are saved at the same moment", async () => {
+    const { nudge } = await rig();
+    await Promise.all([nudge.about(at(), local()), nudge.about(at(), local())]);
+    assert.equal(said().length, 1);
+  });
+
   it("says the file is not committed yet when it is not", async () => {
     answers = { "rev-parse": 0, "check-ignore": 1, "ls-files": 1 };
     const { nudge } = await rig();
