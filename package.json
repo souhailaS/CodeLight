@@ -732,8 +732,8 @@
       "description": "CodeLight writes the annotation file inside .vscode and runs git to see whether your notes are ignored or committed, so it waits until you trust the folder."
     },
     "virtualWorkspaces": {
-      "supported": false,
-      "description": "CodeLight reads and writes the annotation file on disk and runs git against it, neither of which a virtual workspace provides."
+      "supported": "limited",
+      "description": "Notes are read and written through the file system VS Code provides, so they work here. The check that tells you whether git ignores or carries the annotation file runs the git command line, which a virtual workspace has no place to run, so CodeLight says nothing about sharing."
     }
   }
 }

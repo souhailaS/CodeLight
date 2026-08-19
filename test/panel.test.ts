@@ -26,10 +26,10 @@ import { AnnotationStore } from "../src/store";
 let root = "";
 let closing: Array<{ dispose(): void }> = [];
 
-function comment(id: string, body: string): Comment {
+function comment(id: string, body: string, login = "ada"): Comment {
   return {
     id,
-    author: { login: "ada", id: "42" },
+    author: { login, id: "42" },
     body,
     createdAt: "2026-08-17T09:12:33.000Z",
     updatedAt: "2026-08-17T09:12:33.000Z"
@@ -226,6 +226,75 @@ describe("searching the notes", () => {
     assert.ok(items[0].description.includes("@ada"));
     assert.ok(items[0].detail.includes("worth a look"));
     assert.equal((picks[0].options as { matchOnDetail: boolean }).matchOnDetail, true);
+  });
+
+  it("finds a note by the colleague who replied to it", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.comments = [comment("c1", "this is broken", "bob")];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ detail: string }>;
+    assert.ok(items[0].detail.includes("@bob"), items[0].detail);
+  });
+
+  it("tells two files of the same name apart", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "web/src/index.ts")));
+    assert.ok(await store.add(annotation("two", "api/src/index.ts")));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.equal(new Set(items.map((item) => item.description)).size, 2);
+    assert.ok(items.some((item) => item.description.includes("web/src/index.ts")));
+  });
+
+  it("keeps codicon markup out of the row", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.anchor = { text: "$(pwd)", before: "", after: "" };
+    entry.comments = [comment("c1", "$(trash) careful")];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ label: string; detail: string }>;
+    assert.equal(items[0].label.includes("$("), false);
+    assert.equal(items[0].detail.includes("$("), false);
+    assert.ok(items[0].label.includes("pwd"));
+  });
+
+  it("says when the text a note marked is gone", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.orphaned = true;
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.ok(items[0].description.includes("text deleted"), items[0].description);
+  });
+
+  it("keeps a very long comment out of the row", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.comments = [comment("c1", "y".repeat(600)), comment("c2", "z".repeat(600))];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ detail: string }>;
+    assert.ok(items[0].detail.length < 400, String(items[0].detail.length));
+    assert.ok(items[0].detail.includes("…"));
+  });
+
+  it("says it is looking past the colour the panel is filtered to", async () => {
+    const { store, tree, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts", "red")));
+    tree.setFilter("green");
+    queuePick(undefined);
+    await commands.search();
+    const options = picks[0].options as { placeHolder: string };
+    assert.ok(options.placeHolder.includes("filtering out"), options.placeHolder);
   });
 
   it("jumps to the note the reader picked", async () => {

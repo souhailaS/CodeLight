@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+* **Find a note.** A search button above the Annotations panel lists every note in the workspace and narrows as you type, matching the text a note marks, the path of the file it sits in, the person who highlighted it, the colleagues who replied, and the words of the replies themselves. A note whose text was deleted or which this version of the file cannot place says so in the row rather than leading you to a warning. Searching looks past the colour filter, and says so when one is on.
+* CodeLight now says what it can do in a workspace that has no files on disk, such as one opened through GitHub Repositories. Notes are read and written normally there; only the check of whether git ignores or carries the annotation file is missing, so nothing is claimed about sharing. The earlier declaration turned the extension off in those workspaces altogether.
+
 ## 0.7.0
 
 Two things that made CodeLight untrustworthy in exactly the situation it was built for, a team sharing notes through git.

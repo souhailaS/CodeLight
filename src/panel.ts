@@ -48,6 +48,10 @@ function colorIcon(color: string, palette: readonly PaletteColor[]): vscode.Them
     : new vscode.ThemeIcon("circle-filled");
 }
 
+function plain(value: string): string {
+  return value.replace(/\$\(/g, "(");
+}
+
 function trim(value: string, limit: number): string {
   const text = value.replace(/\s+/g, " ").trim();
   if (text === "") {
@@ -280,21 +284,47 @@ export class PanelCommands {
     }
     const items = notes
       .map((annotation) => ({
-        label: snippet(annotation),
-        description: `${basename(annotation.file)} · @${annotation.author.login}`,
-        detail: annotation.comments.map((comment) => comment.body.replace(/\s+/g, " ")).join(" · "),
+        label: plain(snippet(annotation)),
+        description: plain(this.describe(annotation)),
+        detail: plain(
+          annotation.comments
+            .map((comment) => `@${comment.author.login} ${trim(comment.body, 120)}`)
+            .join(" · ")
+        ),
         annotation
       }))
-      .sort((a, b) => (a.description < b.description ? -1 : 1));
+      .sort((a, b) => (a.description === b.description ? 0 : a.description < b.description ? -1 : 1));
+    const filtered = this.tree.activeFilter !== undefined;
     const picked = await vscode.window.showQuickPick(items, {
       title: "CodeLight",
-      placeHolder: "Search the text you marked and the notes you wrote",
+      placeHolder: filtered
+        ? "Search every note, including the colours the panel is filtering out"
+        : "Search the text you marked and the notes you wrote",
       matchOnDescription: true,
       matchOnDetail: true
     });
     if (picked) {
       await this.reveal(picked.annotation.id);
     }
+  }
+
+  private describe(annotation: Annotation): string {
+    const where = this.store.label(annotation.root, annotation.file);
+    const parts = [where, `@${annotation.author.login}`];
+    if (annotation.orphaned === true) {
+      parts.push("text deleted");
+    } else if (this.unplaceable(annotation)) {
+      parts.push("not in this version");
+    }
+    return parts.join(" · ");
+  }
+
+  private unplaceable(annotation: Annotation): boolean {
+    const uri = this.store.uriFor(annotation);
+    const document = uri
+      ? vscode.workspace.textDocuments.find((entry) => entry.uri.toString() === uri.toString())
+      : undefined;
+    return document !== undefined && this.live.detachedIn(document).has(annotation.id);
   }
 
   async deleteAnnotation(node?: Node | string): Promise<void> {
