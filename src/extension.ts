@@ -7,6 +7,7 @@ import { HighlightCommands, useSwatches } from "./highlights";
 import { IdentityProvider } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
+import { RenameWatcher } from "./renames";
 import { MarkerMode } from "./marker";
 import { SharingState } from "./sharing";
 import { FileStatus } from "./statusbar";
@@ -19,6 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const identity = new IdentityProvider();
   const store = new AnnotationStore();
   const live = new LiveRanges(store);
+  const renames = new RenameWatcher(store);
   const visibility = new Visibility();
   const renderer = new HighlightRenderer(store, live, visibility);
   useSwatches(new Swatches(context.globalStorageUri));
@@ -43,6 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
     identity,
     store,
     live,
+    renames,
     renderer,
     marker,
     status,
