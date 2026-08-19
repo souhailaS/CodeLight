@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+* **Go to Next Highlight** and **Go to Previous Highlight** step through the highlights of the open file in the order they sit in it, wrapping round at either end. The status bar says which one you landed on and how many comments it carries. A highlight this version of the file cannot place is skipped rather than jumped to blindly, and when none of them can be placed CodeLight says so instead of moving the cursor. The two commands sit as arrows above the **This File** panel and in the palette, and take no keyboard shortcut of their own.
+
 ## 0.7.0
 
 Two things that made CodeLight untrustworthy in exactly the situation it was built for, a team sharing notes through git.
