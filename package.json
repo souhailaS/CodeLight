@@ -239,6 +239,11 @@
           "light": "media/eye-off-light.svg",
           "dark": "media/eye-off-dark.svg"
         }
+      },
+      {
+        "command": "codelight.resolveConflict",
+        "title": "Merge the Notes After a Conflict",
+        "category": "CodeLight"
       }
     ],
     "keybindings": [
@@ -682,8 +687,13 @@
     "viewsWelcome": [
       {
         "view": "codelight.annotations",
+        "contents": "The annotation file has an unresolved merge conflict, so CodeLight cannot read your notes.\n\n[Merge the notes](command:codelight.resolveConflict)",
+        "when": "codelight.conflicted"
+      },
+      {
+        "view": "codelight.annotations",
         "contents": "CodeLight is showing no notes for this project.\n\nSelect some code and highlight it, then add a comment to start a thread.\n\n[Highlight Selection](command:codelight.addHighlight)\n\n[Open the walkthrough](command:codelight.openWalkthrough)",
-        "when": "workbenchState != empty && !codelight.filtered"
+        "when": "workbenchState != empty && !codelight.filtered && !codelight.conflicted"
       },
       {
         "view": "codelight.annotations",

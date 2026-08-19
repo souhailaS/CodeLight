@@ -380,6 +380,8 @@ export class TextDocument {
   }
 }
 
+export const foldersChanged = new EventEmitter<void>();
+
 export const documentOpened = new EventEmitter<TextDocument>();
 export const documentChanged = new EventEmitter<{
   document: TextDocument;
@@ -836,9 +838,7 @@ export const workspace = {
       }
     };
   },
-  onDidChangeWorkspaceFolders() {
-    return { dispose: () => undefined };
-  },
+  onDidChangeWorkspaceFolders: foldersChanged.event,
   openTextDocument(target: Uri) {
     const found = workspace.textDocuments.find((entry) => entry.uri.toString() === target.toString());
     return Promise.resolve(found ?? { uri: target });
@@ -852,6 +852,7 @@ export function resetFake(): void {
   messages.length = 0;
   workspace.workspaceFolders = [];
   workspace.textDocuments = [];
+  foldersChanged.dispose();
   documentOpened.dispose();
   documentChanged.dispose();
   documentSaved.dispose();
