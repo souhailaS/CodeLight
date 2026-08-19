@@ -107,9 +107,6 @@ export class HighlightCommands {
     const anchors = offsets.map((offset) => buildAnchor(text, offset.start, offset.end));
     const version = editor.document.version;
     const author = await this.identity.require();
-    if (!author) {
-      return [];
-    }
     const color =
       preset ?? (await pickColor(this.renderer.colorsFor(editor.document.uri), "CodeLight"));
     if (!color) {

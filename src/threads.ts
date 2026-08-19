@@ -31,7 +31,7 @@ function bodyOf(comment: vscode.Comment): string {
 }
 
 function authorInfo(comment: Comment): vscode.CommentAuthorInformation {
-  if (!/^\d+$/.test(comment.author.id)) {
+  if (comment.author.id.startsWith("local:") || !/^\d+$/.test(comment.author.id)) {
     return { name: comment.author.login };
   }
   return {
@@ -172,18 +172,7 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const author = await this.identity.require();
-    if (author) {
-      void this.suggestSignIn(reply.thread.uri, author);
-    }
-    if (!author) {
-      const rescued = await rescue(body);
-      if (rescued) {
-        void vscode.window.showInformationMessage(
-          "Your comment was copied to the clipboard. Sign in and paste it back."
-        );
-      }
-      return;
-    }
+    void this.suggestSignIn(reply.thread.uri, author);
     const now = timestamp();
     const comment: Comment = {
       id: newId(),
@@ -271,13 +260,18 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const store = this.store.storeAt(target)?.location;
-    if (!store || (await this.sharing.of(store)) !== "tracked") {
+    const state = store ? await this.sharing.of(store) : "unknown";
+    if (state !== "tracked" && state !== "untracked") {
       return;
     }
     this.askedToSignIn = true;
+    const committed =
+      state === "tracked"
+        ? "These notes are committed, so your colleagues will see them"
+        : "This annotation file is not committed yet, and once it is your colleagues will see these notes";
     void vscode.window
       .showInformationMessage(
-        `These notes are committed, so your colleagues will see them signed ${author.login}, the name git knows you by. Sign in with GitHub to use your account instead.`,
+        `${committed} signed ${author.login}, the name git knows you by. Sign in with GitHub to use your account instead.`,
         "Sign in with GitHub"
       )
       .then((chosen) => {
@@ -617,14 +611,6 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const author = await this.identity.require();
-    if (!author) {
-      if (typed !== "" && (await rescue(typed))) {
-        void vscode.window.showInformationMessage(
-          "Your text was copied to the clipboard."
-        );
-      }
-      return;
-    }
     const created = await this.createAnnotation(thread, undefined, {
       login: author.login,
       id: author.id

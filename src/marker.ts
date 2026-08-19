@@ -69,10 +69,7 @@ export class MarkerMode implements vscode.Disposable {
       );
       return;
     }
-    const author = await this.identity.require();
-    if (!author) {
-      return;
-    }
+    await this.identity.require();
     const picked = await pickColor(this.renderer.colorsFor(editor.document.uri), "Marker");
     if (!picked) {
       return;

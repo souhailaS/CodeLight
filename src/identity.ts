@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as vscode from "vscode";
 import { Author } from "./model";
@@ -12,11 +12,16 @@ export interface Identity extends Author {
   verified: boolean;
 }
 
-export type Asker = (args: string[]) => Promise<string | undefined>;
+export type Asker = (args: string[], cwd?: string) => Promise<string | undefined>;
 
-function askGit(args: string[]): Promise<string | undefined> {
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  const cwd = folder && folder.uri.scheme === "file" ? folder.uri.fsPath : undefined;
+export interface Remembers {
+  get<T>(key: string): T | undefined;
+  update(key: string, value: unknown): Thenable<void>;
+}
+
+const INSTALLATION = "codelight.installation";
+
+function askGit(args: string[], cwd?: string): Promise<string | undefined> {
   return new Promise((done) => {
     execFile("git", args, { cwd, timeout: 3000 }, (error, out) => {
       done(error ? undefined : out.trim());
@@ -55,7 +60,12 @@ export class IdentityProvider implements vscode.Disposable {
 
   readonly onDidChange = this.emitter.event;
 
-  constructor(private readonly ask: Asker = askGit) {
+  private pending: Promise<Identity> | undefined;
+
+  constructor(
+    private readonly ask: Asker = askGit,
+    private readonly memory?: Remembers
+  ) {
     this.disposables.push(
       vscode.authentication.onDidChangeSessions((event) => {
         if (event.provider.id !== PROVIDER) {
@@ -77,7 +87,7 @@ export class IdentityProvider implements vscode.Disposable {
     } catch {
       return this.current;
     }
-    const next = session ? toIdentity(session) : undefined;
+    const next = session ? toIdentity(session) : this.mine;
     const changed =
       next?.id !== this.current?.id || next?.login !== this.current?.login;
     this.current = next;
@@ -101,7 +111,7 @@ export class IdentityProvider implements vscode.Disposable {
     }
   }
 
-  async require(): Promise<Identity | undefined> {
+  async require(): Promise<Identity> {
     if (this.current) {
       return this.current;
     }
@@ -112,39 +122,65 @@ export class IdentityProvider implements vscode.Disposable {
     return this.local();
   }
 
+  async prime(): Promise<void> {
+    await this.refresh().catch(() => undefined);
+    await this.local().catch(() => undefined);
+  }
+
   async local(): Promise<Identity> {
     if (this.mine) {
       return this.mine;
     }
-    const [name, email] = await Promise.all([
-      this.ask(["config", "user.name"]),
-      this.ask(["config", "user.email"])
-    ]);
-    const who = name ?? "";
-    const address = email ?? "";
-    const login = who !== "" ? who : address !== "" ? address : machine();
-    this.mine = {
-      login,
-      id: localId(address !== "" ? address : `${os.hostname()}/${login}`),
-      avatarUrl: "",
-      verified: false
-    };
-    if (!this.current) {
-      this.current = this.mine;
-      this.emitter.fire(this.mine);
-    }
-    return this.mine;
+    this.pending ??= this.resolveLocal();
+    return this.pending;
   }
 
   owns(author: Author): boolean {
-    if (this.current?.id === author.id) {
-      return true;
+    return author.id === this.current?.id || author.id === this.mine?.id;
+  }
+
+  private async resolveLocal(): Promise<Identity> {
+    const { name, email } = await this.fromGit();
+    const address = email.trim().toLowerCase();
+    const who = name.trim();
+    const login = who !== "" ? who : address !== "" ? address : machine();
+    const seed = address !== "" ? address : `${await this.installation()}/${login}`;
+    const mine: Identity = { login, id: localId(seed), avatarUrl: "", verified: false };
+    this.mine = mine;
+    if (!this.current) {
+      this.current = mine;
     }
-    return (
-      author.id.startsWith("local:") &&
-      this.mine !== undefined &&
-      author.id === this.mine.id
-    );
+    this.emitter.fire(this.current);
+    return mine;
+  }
+
+  private async fromGit(): Promise<{ name: string; email: string }> {
+    const roots = (vscode.workspace.workspaceFolders ?? [])
+      .filter((folder) => folder.uri.scheme === "file")
+      .map((folder) => folder.uri.fsPath);
+    for (const cwd of roots.length > 0 ? roots : [undefined]) {
+      const [name, email] = await Promise.all([
+        this.ask(["config", "user.name"], cwd),
+        this.ask(["config", "user.email"], cwd)
+      ]);
+      if ((name ?? "") !== "" || (email ?? "") !== "") {
+        return { name: name ?? "", email: email ?? "" };
+      }
+    }
+    return { name: "", email: "" };
+  }
+
+  private async installation(): Promise<string> {
+    const stored = this.memory?.get<string>(INSTALLATION);
+    if (typeof stored === "string" && stored !== "") {
+      return stored;
+    }
+    const fresh = randomUUID();
+    if (this.memory) {
+      await this.memory.update(INSTALLATION, fresh).then(undefined, () => undefined);
+      return fresh;
+    }
+    return `${os.hostname()}/${machine()}`;
   }
 
   dispose(): void {

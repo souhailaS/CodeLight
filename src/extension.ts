@@ -16,7 +16,7 @@ import { Swatches } from "./swatches";
 import { ThreadComment, ThreadView } from "./threads";
 
 export function activate(context: vscode.ExtensionContext): void {
-  const identity = new IdentityProvider();
+  const identity = new IdentityProvider(undefined, context.globalState);
   const store = new AnnotationStore();
   const live = new LiveRanges(store);
   const visibility = new Visibility();
@@ -37,7 +37,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const fileComments = new FileCommentsView(store, live, sharing);
   const ready = store.initialize().catch(() => undefined);
   void ready.then(() => fileComments.ready());
-  void identity.refresh().catch(() => undefined);
+  void identity.prime();
 
   context.subscriptions.push(
     identity,

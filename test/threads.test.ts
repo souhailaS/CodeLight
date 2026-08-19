@@ -25,7 +25,7 @@ import { Annotation } from "../src/model";
 import { LiveRanges } from "../src/live";
 import { AnnotationStore } from "../src/store";
 import { Visibility } from "../src/visibility";
-import { IdentityProvider } from "../src/identity";
+import { IdentityProvider, localId } from "../src/identity";
 import { ThreadComment, ThreadView } from "../src/threads";
 
 let root = "";
@@ -220,7 +220,8 @@ describe("who a comment is shown as", () => {
   it("offers edit and delete on a note you wrote without signing in", async () => {
     authentication.session = undefined;
     const { store, identity, view } = await build();
-    const me = await identity.local();
+    await identity.prime();
+    const me = { login: "ada", id: localId("ada@b.c") };
     writeStore([annotation("a1", [comment("c1", "first note")])]);
     const stored = JSON.parse(
       fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8")
