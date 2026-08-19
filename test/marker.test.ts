@@ -94,7 +94,7 @@ async function rig(): Promise<Rig> {
   const live = new LiveRanges(store);
   const visibility = new Visibility();
   const renderer = new HighlightRenderer(store, live, visibility);
-  const identity = new IdentityProvider();
+  const identity = new IdentityProvider(async (args) => (args[1] === "user.name" ? "ada" : "ada@b.c"));
   useSwatches(new Swatches(Uri.file(nodePath.join(root, "storage"))));
   const highlights = new HighlightCommands(store, identity, renderer, live, visibility);
   const marker = new MarkerMode(identity, store, renderer, highlights, live, visibility);
@@ -157,11 +157,15 @@ describe("turning the marker on", () => {
     assert.ok(warnings().some((entry) => entry.includes("folder of this workspace")));
   });
 
-  it("stays off when nobody is signed in", async () => {
+  it("works without a github sign in, marking as the local git user", async () => {
     authentication.session = undefined;
-    const { marker } = await rig();
+    const { store, marker, editor, document } = await rig();
     await turnOn(marker);
-    assert.equal(marker.active, false);
+    assert.ok(marker.active);
+    drive(editor, [select(document, 6, 11)]);
+    await reach(store, [["total", "yellow", 0]]);
+    assert.equal(store.all[0].author.login, "ada");
+    assert.ok(store.all[0].author.id.startsWith("local:"));
   });
 
   it("turns itself off the second time", async () => {
