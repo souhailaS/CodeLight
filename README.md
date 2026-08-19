@@ -25,7 +25,7 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 * Highlight any selection in a colour of your choice, with a palette you can redefine.
 * Turn on the marker and each selection gets highlighted until you turn it off. Select one of your own uncommented highlights exactly and it changes colour instead.
 * Hide every highlight and comment with one button, and bring them back with the same one.
-* Attach comments to a highlight and reply to your colleagues, each one labelled with the GitHub account that was signed in when it was written.
+* Attach comments to a highlight and reply to your colleagues. A note is labelled with your GitHub account when you are signed in, and with the name git knows you by when you are not, so you can read and annotate offline and without an account. Signing in later leaves the notes you already wrote yours to edit and delete.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
 * Give every folder of a multi root workspace its own annotation file, so notes follow the folder they belong to.

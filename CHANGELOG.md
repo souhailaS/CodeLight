@@ -3,6 +3,7 @@
 ## Unreleased
 
 * **Notes follow a file you rename.** Renaming a file or a folder in VS Code used to strand every note on it, because the note remembers the path. The notes now move with it, including a file dragged into another folder of the workspace, whose notes move into that folder's annotation file. A file that leaves the workspace leaves its notes behind, and CodeLight says so rather than leaving you to find out, as it does when the annotation file cannot be written or has a merge conflict in it. A rename VS Code never reports, `git mv` in a terminal for instance, is one CodeLight cannot see at all, so those notes stay on the old path silently. When a rename writes over a file that had notes of its own, those notes are marked as having lost their text instead of quietly describing content that is gone.
+* **A note no longer needs a GitHub account.** CodeLight used to refuse to write anything until you signed in. It now signs a note with the name git knows you by when there is no account signed in, which is the name your commits already carry, so a first run needs nothing set up. The name is not verified by anything, and CodeLight says so rather than dressing it up, once a window, the first time you write a note into an annotation file git carries or is about to. When git knows neither a name nor an email the note carries the account name on this machine, and every message says that is what it is. Sign in later and the notes you wrote before are still yours to edit and delete.
 
 ## 0.7.0
 

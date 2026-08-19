@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import { buildAnchor, findAnchor } from "./anchors";
 import { newId, timestamp } from "./ids";
 import { IdentityProvider } from "./identity";
+import { SignInNudge } from "./nudge";
+import { SharingState } from "./sharing";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { readGutterMode, readPalette } from "./palette";
@@ -30,6 +32,9 @@ function bodyOf(comment: vscode.Comment): string {
 }
 
 function authorInfo(comment: Comment): vscode.CommentAuthorInformation {
+  if (comment.author.id.startsWith("local:") || !/^\d+$/.test(comment.author.id)) {
+    return { name: comment.author.login };
+  }
   return {
     name: comment.author.login,
     iconPath: vscode.Uri.parse(
@@ -57,7 +62,9 @@ export class ThreadView implements vscode.Disposable {
     private readonly store: AnnotationStore,
     private readonly live: LiveRanges,
     private readonly identity: IdentityProvider,
-    private readonly visibility: Visibility
+    private readonly visibility: Visibility,
+    sharing = new SharingState(),
+    private readonly nudge = new SignInNudge(store, sharing)
   ) {
     this.controller = vscode.comments.createCommentController("codelight", "CodeLight");
     this.controller.options = {
@@ -166,15 +173,6 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const author = await this.identity.require();
-    if (!author) {
-      const rescued = await rescue(body);
-      if (rescued) {
-        void vscode.window.showInformationMessage(
-          "Your comment was copied to the clipboard. Sign in and paste it back."
-        );
-      }
-      return;
-    }
     const now = timestamp();
     const comment: Comment = {
       id: newId(),
@@ -211,6 +209,7 @@ export class ThreadView implements vscode.Disposable {
       if (created) {
         created.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
       }
+      void this.nudge.about(reply.thread.uri, author);
       return;
     }
     {
@@ -254,6 +253,7 @@ export class ThreadView implements vscode.Disposable {
     }
     this.drafts.delete(annotationId);
     reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    void this.nudge.about(reply.thread.uri, author);
     this.sync();
   }
 
@@ -587,18 +587,13 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const author = await this.identity.require();
-    if (!author) {
-      if (typed !== "" && (await rescue(typed))) {
-        void vscode.window.showInformationMessage(
-          "Your text was copied to the clipboard."
-        );
-      }
-      return;
-    }
     const created = await this.createAnnotation(thread, undefined, {
       login: author.login,
       id: author.id
     });
+    if (created !== undefined) {
+      void this.nudge.about(thread.uri, author);
+    }
     if (typed === "") {
       return;
     }
@@ -784,7 +779,7 @@ export class ThreadView implements vscode.Disposable {
   }
 
   private fill(thread: vscode.CommentThread, annotation: Annotation): void {
-    const me = this.identity.identity?.id;
+    const mine = (author: { id: string }) => this.identity.owns(author as never);
     const editing = new Map<string, ThreadComment>();
     for (const entry of thread.comments) {
       if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
@@ -808,7 +803,7 @@ export class ThreadView implements vscode.Disposable {
         body,
         vscode.CommentMode.Preview,
         authorInfo(comment),
-        comment.author.id === me ? "mine" : "theirs",
+        mine(comment.author) ? "mine" : "theirs",
         parseDate(comment.createdAt)
       );
     });
