@@ -4,7 +4,16 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { invoked, messages, queueAnswer, resetFake, Uri, warnings, workspace } from "./fakevscode";
+import {
+  foldersChanged,
+  invoked,
+  messages,
+  queueAnswer,
+  resetFake,
+  Uri,
+  warnings,
+  workspace
+} from "./fakevscode";
 import { mergeSides, sidesOf } from "../src/conflict";
 import { Annotation, hasConflict, parseStore, serializeStore } from "../src/model";
 import { AnnotationStore } from "../src/store";
@@ -342,6 +351,47 @@ describe("what the store does about it", () => {
       ["fine"]
     );
     fs.rmSync(clean, { recursive: true, force: true });
+  });
+
+  it("stops claiming a conflict when the file goes back to what it held", NEEDS_GIT, async () => {
+    const start = serializeStore([annotation("mine", "src/a.ts")]);
+    const store = await open(start);
+    assert.equal(store.all.length, 1);
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")])
+    );
+    await store.refresh();
+    assert.equal(store.all.length, 1);
+    invoked.length = 0;
+    fs.writeFileSync(nodePath.join(root, ".vscode", "codelight.json"), start);
+    await store.refresh();
+    const last = invoked.filter((call) => call[1] === "codelight.conflicted").pop();
+    assert.deepEqual(last?.[2], false, JSON.stringify(invoked));
+  });
+
+  it("stops claiming a conflict once a folder leaves the workspace", NEEDS_GIT, async () => {
+    const store = await open(
+      conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")])
+    );
+    assert.equal(store.folders.some((folder) => folder.conflicted), true);
+    workspace.workspaceFolders = [];
+    foldersChanged.fire();
+    const told = () => invoked.filter((call) => call[1] === "codelight.conflicted").pop()?.[2];
+    for (let attempt = 0; attempt < 100 && told() !== false; attempt += 1) {
+      await new Promise((done) => setTimeout(done, 10));
+    }
+    assert.equal(told(), false, JSON.stringify(invoked));
+  });
+
+  it("says nothing reassuring when it could not make sense of the conflict", async () => {
+    const store = await open(["<<<<<<< HEAD", "{not json", "=======", "{}", ">>>>>>> other"].join("\n"));
+    messages.length = 0;
+    assert.equal(await store.resolveConflict(), false);
+    assert.equal(
+      messages.some((line) => line.includes("no merge conflict to put back together")),
+      false
+    );
   });
 
   it("stops claiming a conflict once the file is fixed by hand", NEEDS_GIT, async () => {

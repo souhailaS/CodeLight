@@ -515,7 +515,11 @@ export class FolderStore implements vscode.Disposable {
         return;
       }
       this.reportedFailure = undefined;
+      const wasStuck = this.inConflict;
       this.clearConflict();
+      if (wasStuck) {
+        this.emitter.fire();
+      }
       if (disk.status === "missing") {
         this.active = undefined;
         if (this.annotations.size === 0 && this.lastSerialized === undefined) {

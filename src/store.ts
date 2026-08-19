@@ -186,7 +186,7 @@ export class AnnotationStore implements vscode.Disposable {
       outcomes.push(await store.resolveConflict());
     }
     this.tellAboutConflicts();
-    if (outcomes.every((outcome) => outcome === "clean") && outcomes.length > 0) {
+    if (!outcomes.includes("merged") && !outcomes.includes("stuck")) {
       void vscode.window.showInformationMessage(
         "CodeLight found no merge conflict to put back together."
       );
@@ -291,6 +291,7 @@ export class AnnotationStore implements vscode.Disposable {
       changed = true;
     }
     await Promise.all(opening);
+    this.tellAboutConflicts();
     if (changed) {
       this.emitter.fire();
     }
