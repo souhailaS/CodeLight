@@ -2,7 +2,7 @@
   "name": "codelight",
   "displayName": "CodeLight",
   "description": "Highlights and comments for VS Code, kept beside your code and shared through git when you commit them.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "media/icon.png",
   "publisher": "souhailaserbout",

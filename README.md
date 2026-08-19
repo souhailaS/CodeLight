@@ -78,7 +78,7 @@ To build it from source instead, package the repository and install the result.
 ```
 npm install
 npx @vscode/vsce package
-code --install-extension codelight-0.7.0.vsix
+code --install-extension codelight-0.8.0.vsix
 ```
 
 ## License
