@@ -224,6 +224,10 @@ export function activate(context: vscode.ExtensionContext): void {
         await stopKeepingPrivate(root);
       }
     }),
+    vscode.commands.registerCommand("codelight.resolveConflict", async () => {
+      await ready;
+      await store.resolveConflict();
+    }),
     vscode.commands.registerCommand("codelight.convertStorage", async () => {
       await ready;
       await store.convertStorage();

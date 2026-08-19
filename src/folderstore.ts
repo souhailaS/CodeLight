@@ -2,7 +2,8 @@ import { promisify } from "node:util";
 import { gunzip, gzip } from "node:zlib";
 import * as vscode from "vscode";
 import { inspectTarget, TEMPORARY_NAME, writeThroughTemporary } from "./atomic";
-import { Annotation, parseStore, serializeStore } from "./model";
+import { mergeSides } from "./conflict";
+import { Annotation, hasConflict, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
 import { exists, isMissingFile, statFile, STORE_PATTERN, storeUri } from "./paths";
 
@@ -23,6 +24,7 @@ type DiskState =
       source: vscode.Uri;
     }
   | { status: "missing" }
+  | { status: "conflict"; target: vscode.Uri }
   | { status: "error"; message: string };
 
 interface StoreFiles {
@@ -99,6 +101,7 @@ export class FolderStore implements vscode.Disposable {
   private reportedDuplicate: string | undefined;
   private reportedInPlace = false;
   private sweeping = false;
+  private inConflict = false;
   private generation = 0;
   private active: vscode.Uri | undefined;
 
@@ -230,6 +233,10 @@ export class FolderStore implements vscode.Disposable {
       }
       if (disk.status === "error") {
         this.reportFailure(disk.message);
+        return false;
+      }
+      if (disk.status === "conflict") {
+        this.reportConflict(disk.target);
         return false;
       }
       if (disk.status === "missing") {
@@ -383,6 +390,10 @@ export class FolderStore implements vscode.Disposable {
         this.reportFailure(disk.message);
         return false;
       }
+      if (disk.status === "conflict") {
+        this.reportConflict(disk.target);
+        return false;
+      }
       const annotations = disk.status === "ok" ? disk.annotations : new Map<string, Annotation>();
       const rejected = disk.status === "ok" ? disk.rejected : [];
       const stale =
@@ -432,6 +443,9 @@ export class FolderStore implements vscode.Disposable {
       return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
     }
     try {
+      if (hasConflict(raw)) {
+        return { status: "conflict", target };
+      }
       const parsed = parseStore(raw);
       return {
         status: "ok",
@@ -496,7 +510,16 @@ export class FolderStore implements vscode.Disposable {
         this.reportFailure(disk.message);
         return;
       }
+      if (disk.status === "conflict") {
+        this.reportConflict(disk.target);
+        return;
+      }
       this.reportedFailure = undefined;
+      const wasStuck = this.inConflict;
+      this.clearConflict();
+      if (wasStuck) {
+        this.emitter.fire();
+      }
       if (disk.status === "missing") {
         this.active = undefined;
         if (this.annotations.size === 0 && this.lastSerialized === undefined) {
@@ -602,6 +625,101 @@ export class FolderStore implements vscode.Disposable {
     }
     this.reportedFailure = message;
     void vscode.window.showErrorMessage(message);
+  }
+
+  private clearConflict(): void {
+    this.inConflict = false;
+  }
+
+  private reportConflict(target: vscode.Uri): void {
+    this.inConflict = true;
+    this.emitter.fire();
+    const message = `CodeLight cannot read ${target.fsPath} because it has an unresolved merge conflict.`;
+    if (this.reportedFailure === message) {
+      return;
+    }
+    this.reportedFailure = message;
+    void vscode.window
+      .showWarningMessage(message, "Merge the notes", "Open the file")
+      .then(async (chosen) => {
+        if (chosen === "Open the file") {
+          await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(target));
+          return;
+        }
+        if (chosen === "Merge the notes") {
+          await vscode.commands.executeCommand("codelight.resolveConflict");
+        }
+      });
+  }
+
+  get conflicted(): boolean {
+    return this.inConflict;
+  }
+
+  async resolveConflict(): Promise<"merged" | "clean" | "stuck" | "skipped"> {
+    const files = this.snapshot();
+    const generation = this.generation;
+    return this.enqueue(async () => {
+      if (generation !== this.generation) {
+        return "skipped";
+      }
+      const chosen = await this.pick(files);
+      if (generation !== this.generation) {
+        return "skipped";
+      }
+      if (chosen.status === "error") {
+        this.reportFailure(chosen.message);
+        return "skipped";
+      }
+      const target = chosen.target;
+      let raw: string;
+      try {
+        raw = await decodeStore(await vscode.workspace.fs.readFile(target), target);
+      } catch (error) {
+        if (isMissingFile(error)) {
+          return "skipped";
+        }
+        this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
+        return "skipped";
+      }
+      if (!hasConflict(raw)) {
+        this.clearConflict();
+        return "clean";
+      }
+      const merged = mergeSides(raw);
+      if (!merged) {
+        void vscode.window.showWarningMessage(
+          `CodeLight could not make sense of the conflict in ${target.fsPath}, so it left the file alone. Resolve it by hand.`
+        );
+        return "stuck";
+      }
+      const content = serializeStore(merged.annotations, merged.rejected);
+      try {
+        await this.writeStore(target, content);
+      } catch (error) {
+        this.reportFailure(`CodeLight could not save ${target.fsPath}. ${describe(error)}`);
+        return "stuck";
+      }
+      if (generation !== this.generation) {
+        return "merged";
+      }
+      this.clearConflict();
+      this.reportedFailure = undefined;
+      const gone =
+        merged.dropped === 0 ? "" : ` ${merged.dropped} that one side had deleted stayed deleted.`;
+      const guess = merged.sawBase
+        ? ""
+        : " Git left no record of what the file held before, so a note either side deleted is back.";
+      void vscode.window.showInformationMessage(
+        `CodeLight merged the notes in ${target.fsPath}, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.${gone}${guess} Stage the file with git add once you are happy with it.`
+      );
+      return "merged";
+    }).then(async (outcome) => {
+      if (outcome === "merged" || outcome === "clean") {
+        await this.refresh();
+      }
+      return outcome;
+    });
   }
 
   private warnAboutInPlace(target: vscode.Uri): void {
