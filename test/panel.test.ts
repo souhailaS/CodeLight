@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   details,
   messages,
+  opened,
+  picks,
+  queuePick,
   queueAnswer,
   resetFake,
   ThemeIcon,
@@ -203,6 +206,47 @@ describe("the annotation tree", () => {
     assert.ok(await store.add(annotation("one", "src/a.ts")));
     listener.dispose();
     assert.ok(drawn > 0);
+  });
+});
+
+describe("searching the notes", () => {
+  it("offers the marked text, the file and the author", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.anchor = { text: "const total", before: "", after: "" };
+    entry.comments = [comment("c1", "worth a look")];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    assert.equal(picks.length, 1);
+    const items = picks[0].items as Array<{ label: string; description: string; detail: string }>;
+    assert.equal(items.length, 1);
+    assert.equal(items[0].label, "const total");
+    assert.ok(items[0].description.includes("a.ts"));
+    assert.ok(items[0].description.includes("@ada"));
+    assert.ok(items[0].detail.includes("worth a look"));
+    assert.equal((picks[0].options as { matchOnDetail: boolean }).matchOnDetail, true);
+  });
+
+  it("jumps to the note the reader picked", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/b.ts")));
+    queuePick(1);
+    messages.length = 0;
+    await commands.search();
+    assert.deepEqual(
+      opened.map((document) => nodePath.basename(document.uri.fsPath)),
+      ["b.ts"]
+    );
+  });
+
+  it("says so when there is nothing to search", async () => {
+    const { commands } = await panel();
+    messages.length = 0;
+    await commands.search();
+    assert.ok(messages.some((line) => line.includes("no notes to search")));
+    assert.deepEqual(picks, []);
   });
 });
 

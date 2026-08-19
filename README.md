@@ -28,6 +28,7 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 * Attach comments to a highlight and reply to your colleagues, each one labelled with the GitHub account that was signed in when it was written.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
+* Search every note you or a colleague wrote, by the text it marks, the file it sits in, the person who wrote it, or the words in the note itself.
 * Give every folder of a multi root workspace its own annotation file, so notes follow the folder they belong to.
 * Keep the notes of each folder in one file under `.vscode`, so they travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.
 

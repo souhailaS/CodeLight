@@ -272,6 +272,31 @@ export class PanelCommands {
     }
   }
 
+  async search(): Promise<void> {
+    const notes = this.store.all;
+    if (notes.length === 0) {
+      void vscode.window.showInformationMessage("CodeLight has no notes to search yet.");
+      return;
+    }
+    const items = notes
+      .map((annotation) => ({
+        label: snippet(annotation),
+        description: `${basename(annotation.file)} · @${annotation.author.login}`,
+        detail: annotation.comments.map((comment) => comment.body.replace(/\s+/g, " ")).join(" · "),
+        annotation
+      }))
+      .sort((a, b) => (a.description < b.description ? -1 : 1));
+    const picked = await vscode.window.showQuickPick(items, {
+      title: "CodeLight",
+      placeHolder: "Search the text you marked and the notes you wrote",
+      matchOnDescription: true,
+      matchOnDetail: true
+    });
+    if (picked) {
+      await this.reveal(picked.annotation.id);
+    }
+  }
+
   async deleteAnnotation(node?: Node | string): Promise<void> {
     const id = nodeId(node);
     if (id === undefined) {

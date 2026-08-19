@@ -108,6 +108,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("codelight.threadDelete", async (comment: ThreadComment) => {
       await threads.deleteComment(comment);
     }),
+    vscode.commands.registerCommand("codelight.search", async () => {
+      await ready;
+      await panel.search();
+    }),
     vscode.commands.registerCommand("codelight.showPanel", async () => {
       await vscode.commands.executeCommand("codelight.annotations.focus");
     }),
