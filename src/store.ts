@@ -119,6 +119,10 @@ export class AnnotationStore implements vscode.Disposable {
     return pathLabel(store.rootUri);
   }
 
+  foldersHolding(target: vscode.Uri): FolderStore[] {
+    return this.folders.filter((store) => toRelativePath(store.rootUri, target) !== undefined);
+  }
+
   rootFor(target: vscode.Uri): vscode.Uri | undefined {
     return this.folderFor(target)?.rootUri;
   }

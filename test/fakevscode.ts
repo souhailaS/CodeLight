@@ -382,6 +382,8 @@ export class TextDocument {
 
 export const foldersChanged = new EventEmitter<void>();
 
+export const filesRenamed = new EventEmitter<{ files: ReadonlyArray<{ oldUri: Uri; newUri: Uri }> }>();
+
 export const documentOpened = new EventEmitter<TextDocument>();
 export const documentChanged = new EventEmitter<{
   document: TextDocument;
@@ -688,16 +690,24 @@ export enum TextEditorSelectionChangeKind {
 
 export const authentication = {
   session: undefined as { account: { label: string; id: string }; accessToken: string } | undefined,
-  getSession(_provider: string, _scopes: string[], options?: { createIfNone?: boolean }) {
-    if (!authentication.session && options?.createIfNone !== true) {
-      return Promise.resolve(undefined);
+  delayMs: 0,
+  async getSession(_provider: string, _scopes: string[], options?: { createIfNone?: boolean }) {
+    const answer = authentication.session;
+    if (authentication.delayMs > 0) {
+      const wait = authentication.delayMs;
+      await new Promise((done) => setTimeout(done, wait));
     }
-    return Promise.resolve(authentication.session);
+    if (!answer && options?.createIfNone !== true) {
+      return undefined;
+    }
+    return options?.createIfNone === true ? authentication.session : answer;
   },
-  onDidChangeSessions() {
-    return { dispose: () => undefined };
+  onDidChangeSessions(listener: (event: { provider: { id: string } }) => void) {
+    return sessionsChanged.event(listener);
   }
 };
+
+export const sessionsChanged = new EventEmitter<{ provider: { id: string } }>();
 
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: Uri; name: string; index: number }>,
@@ -839,6 +849,7 @@ export const workspace = {
     };
   },
   onDidChangeWorkspaceFolders: foldersChanged.event,
+  onDidRenameFiles: filesRenamed.event,
   openTextDocument(target: Uri) {
     const found = workspace.textDocuments.find((entry) => entry.uri.toString() === target.toString());
     return Promise.resolve(found ?? { uri: target });
@@ -853,6 +864,7 @@ export function resetFake(): void {
   workspace.workspaceFolders = [];
   workspace.textDocuments = [];
   foldersChanged.dispose();
+  filesRenamed.dispose();
   documentOpened.dispose();
   documentChanged.dispose();
   documentSaved.dispose();
@@ -874,6 +886,7 @@ export function resetFake(): void {
   picks.length = 0;
   chosen.length = 0;
   authentication.session = undefined;
+  authentication.delayMs = 0;
   editorSelectionChanged.dispose();
   activeEditorChanged.dispose();
 }

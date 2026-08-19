@@ -99,6 +99,18 @@
         "category": "CodeLight"
       },
       {
+        "command": "codelight.nextHighlight",
+        "title": "Go to Next Highlight",
+        "category": "CodeLight",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "codelight.previousHighlight",
+        "title": "Go to Previous Highlight",
+        "category": "CodeLight",
+        "icon": "$(arrow-up)"
+      },
+      {
         "command": "codelight.showPanel",
         "title": "Show Annotations",
         "category": "CodeLight",
@@ -374,6 +386,16 @@
         }
       ],
       "view/title": [
+        {
+          "command": "codelight.previousHighlight",
+          "when": "view == codelight.fileComments",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codelight.nextHighlight",
+          "when": "view == codelight.fileComments",
+          "group": "navigation@2"
+        },
         {
           "command": "codelight.filterByColor",
           "when": "view == codelight.annotations && !codelight.filtered",

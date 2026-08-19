@@ -4,10 +4,13 @@ import { HighlightRenderer } from "./decorations";
 import { FileCommentsView } from "./fileview";
 import { keepPrivate, stopKeepingPrivate } from "./gitignore";
 import { HighlightCommands, useSwatches } from "./highlights";
-import { IdentityProvider } from "./identity";
+import { IdentityProvider, sourceOf } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
+import { RenameWatcher } from "./renames";
 import { MarkerMode } from "./marker";
+import { Navigation } from "./navigate";
+import { SignInNudge } from "./nudge";
 import { SharingState } from "./sharing";
 import { FileStatus } from "./statusbar";
 import { AnnotationStore } from "./store";
@@ -16,18 +19,20 @@ import { Swatches } from "./swatches";
 import { ThreadComment, ThreadView } from "./threads";
 
 export function activate(context: vscode.ExtensionContext): void {
-  const identity = new IdentityProvider();
+  const identity = new IdentityProvider(undefined, context.globalState);
   const store = new AnnotationStore();
   const live = new LiveRanges(store);
   const visibility = new Visibility();
   const renderer = new HighlightRenderer(store, live, visibility);
   useSwatches(new Swatches(context.globalStorageUri));
-  const highlights = new HighlightCommands(store, identity, renderer, live, visibility);
-  const marker = new MarkerMode(identity, store, renderer, highlights, live, visibility);
   const sharing = new SharingState();
+  const nudge = new SignInNudge(store, sharing);
+  const highlights = new HighlightCommands(store, identity, renderer, live, visibility, nudge);
+  const marker = new MarkerMode(identity, store, renderer, highlights, live, visibility);
   const status = new FileStatus(store, visibility, sharing);
   const comments = new CommentCommands(store, identity, highlights);
-  const threads = new ThreadView(store, live, identity, visibility);
+  const threads = new ThreadView(store, live, identity, visibility, sharing, nudge);
+  const navigation = new Navigation(store, live, visibility);
   const tree = new AnnotationTree(store, live);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
@@ -36,15 +41,18 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const fileComments = new FileCommentsView(store, live, sharing);
   const ready = store.initialize().catch(() => undefined);
+  const renames = new RenameWatcher(store, ready);
   void ready.then(() => fileComments.ready());
-  void identity.refresh().catch(() => undefined);
+  void identity.prime();
 
   context.subscriptions.push(
     identity,
     store,
     live,
+    renames,
     renderer,
     marker,
+    navigation,
     status,
     visibility,
     vscode.commands.registerCommand("codelight.toggleVisibility", () => {
@@ -112,6 +120,14 @@ export function activate(context: vscode.ExtensionContext): void {
       await ready;
       await panel.search();
     }),
+    vscode.commands.registerCommand("codelight.nextHighlight", async () => {
+      await ready;
+      await navigation.step(true);
+    }),
+    vscode.commands.registerCommand("codelight.previousHighlight", async () => {
+      await ready;
+      await navigation.step(false);
+    }),
     vscode.commands.registerCommand("codelight.showPanel", async () => {
       await vscode.commands.executeCommand("codelight.annotations.focus");
     }),
@@ -139,10 +155,15 @@ export function activate(context: vscode.ExtensionContext): void {
       panel.clearFilter();
     }),
     vscode.commands.registerCommand("codelight.signIn", async () => {
-      const account = await identity.require();
+      const account = await identity.signIn();
       if (account) {
         void vscode.window.showInformationMessage(`CodeLight is signed in as ${account.login}.`);
+        return;
       }
+      const local = await identity.local();
+      void vscode.window.showWarningMessage(
+        `CodeLight is not signed in, so new notes carry ${sourceOf(local)}, ${local.login}.`
+      );
     }),
     vscode.commands.registerCommand("codelight.addHighlight", async () => {
       await ready;
@@ -242,12 +263,13 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
       }
-      const account = identity.identity;
+      const account = identity.identity ?? (await identity.local());
       const count = store.all.length;
+      const who = account.verified
+        ? `signed in as ${account.login}`
+        : `signing notes ${account.login}, ${sourceOf(account)}`;
       void vscode.window.showInformationMessage(
-        `CodeLight tracks ${count} annotation${count === 1 ? "" : "s"}, ${
-          account ? `signed in as ${account.login}` : "and you are not signed in"
-        }.`
+        `CodeLight tracks ${count} annotation${count === 1 ? "" : "s"}, ${who}.`
       );
     })
   );
