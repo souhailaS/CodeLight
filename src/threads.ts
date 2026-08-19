@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { buildAnchor, findAnchor } from "./anchors";
 import { newId, timestamp } from "./ids";
-import { IdentityProvider } from "./identity";
+import { Identity, IdentityProvider } from "./identity";
+import { SharingState } from "./sharing";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation, Comment, MAX_COMMENT_BODY } from "./model";
 import { readGutterMode, readPalette } from "./palette";
@@ -30,6 +31,9 @@ function bodyOf(comment: vscode.Comment): string {
 }
 
 function authorInfo(comment: Comment): vscode.CommentAuthorInformation {
+  if (!/^\d+$/.test(comment.author.id)) {
+    return { name: comment.author.login };
+  }
   return {
     name: comment.author.login,
     iconPath: vscode.Uri.parse(
@@ -52,12 +56,14 @@ export class ThreadView implements vscode.Disposable {
   private lostTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number; length: number }>();
   private readonly disposables: vscode.Disposable[] = [];
+  private askedToSignIn = false;
 
   constructor(
     private readonly store: AnnotationStore,
     private readonly live: LiveRanges,
     private readonly identity: IdentityProvider,
-    private readonly visibility: Visibility
+    private readonly visibility: Visibility,
+    private readonly sharing = new SharingState()
   ) {
     this.controller = vscode.comments.createCommentController("codelight", "CodeLight");
     this.controller.options = {
@@ -166,6 +172,9 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const author = await this.identity.require();
+    if (author) {
+      this.suggestSignIn(reply.thread.uri, author);
+    }
     if (!author) {
       const rescued = await rescue(body);
       if (rescued) {
@@ -255,6 +264,27 @@ export class ThreadView implements vscode.Disposable {
     this.drafts.delete(annotationId);
     reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.sync();
+  }
+
+  private suggestSignIn(target: vscode.Uri, author: Identity): void {
+    if (author.verified || this.askedToSignIn) {
+      return;
+    }
+    const store = this.store.storeAt(target)?.location;
+    if (!store || this.sharing.known(store) !== "tracked") {
+      return;
+    }
+    this.askedToSignIn = true;
+    void vscode.window
+      .showInformationMessage(
+        `These notes are committed, so your colleagues will see them signed ${author.login}, the name git knows you by. Sign in with GitHub to use your account instead.`,
+        "Sign in with GitHub"
+      )
+      .then((chosen) => {
+        if (chosen === "Sign in with GitHub") {
+          void vscode.commands.executeCommand("codelight.signIn");
+        }
+      });
   }
 
   private collectLostEdit(entry: ThreadComment): void {

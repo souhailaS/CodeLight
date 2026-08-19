@@ -27,7 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const sharing = new SharingState();
   const status = new FileStatus(store, visibility, sharing);
   const comments = new CommentCommands(store, identity, highlights);
-  const threads = new ThreadView(store, live, identity, visibility);
+  const threads = new ThreadView(store, live, identity, visibility, sharing);
   const tree = new AnnotationTree(store, live);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
@@ -135,10 +135,15 @@ export function activate(context: vscode.ExtensionContext): void {
       panel.clearFilter();
     }),
     vscode.commands.registerCommand("codelight.signIn", async () => {
-      const account = await identity.require();
+      const account = await identity.signIn();
       if (account) {
         void vscode.window.showInformationMessage(`CodeLight is signed in as ${account.login}.`);
+        return;
       }
+      const local = await identity.local();
+      void vscode.window.showWarningMessage(
+        `CodeLight is not signed in, so new notes carry the name git knows you by, ${local.login}.`
+      );
     }),
     vscode.commands.registerCommand("codelight.addHighlight", async () => {
       await ready;

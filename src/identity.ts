@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import * as os from "node:os";
 import * as vscode from "vscode";
 import { Author } from "./model";
 
@@ -6,6 +9,17 @@ const SCOPES = ["read:user"];
 
 export interface Identity extends Author {
   avatarUrl: string;
+  verified: boolean;
+}
+
+export type Asker = (args: string[]) => Promise<string | undefined>;
+
+function askGit(args: string[]): Promise<string | undefined> {
+  return new Promise((done) => {
+    execFile("git", args, { timeout: 3000 }, (error, out) => {
+      done(error ? undefined : out.trim());
+    });
+  });
 }
 
 function toIdentity(session: vscode.AuthenticationSession): Identity {
@@ -14,18 +28,24 @@ function toIdentity(session: vscode.AuthenticationSession): Identity {
   return {
     login,
     id,
-    avatarUrl: `https://avatars.githubusercontent.com/u/${encodeURIComponent(id)}`
+    avatarUrl: `https://avatars.githubusercontent.com/u/${encodeURIComponent(id)}`,
+    verified: true
   };
+}
+
+export function localId(seed: string): string {
+  return `local:${createHash("sha256").update(seed).digest("hex").slice(0, 16)}`;
 }
 
 export class IdentityProvider implements vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<Identity | undefined>();
   private readonly disposables: vscode.Disposable[] = [];
   private current: Identity | undefined;
+  private mine: Identity | undefined;
 
   readonly onDidChange = this.emitter.event;
 
-  constructor() {
+  constructor(private readonly ask: Asker = askGit) {
     this.disposables.push(
       vscode.authentication.onDidChangeSessions((event) => {
         if (event.provider.id !== PROVIDER) {
@@ -79,13 +99,23 @@ export class IdentityProvider implements vscode.Disposable {
     if (existing) {
       return existing;
     }
-    const identity = await this.signIn();
-    if (!identity) {
-      void vscode.window.showWarningMessage(
-        "CodeLight needs a GitHub sign in so annotations can be attributed to you."
-      );
+    return this.local();
+  }
+
+  async local(): Promise<Identity> {
+    if (this.mine) {
+      return this.mine;
     }
-    return identity;
+    const name = (await this.ask(["config", "user.name"])) ?? "";
+    const email = (await this.ask(["config", "user.email"])) ?? "";
+    const login = name !== "" ? name : email !== "" ? email : os.userInfo().username;
+    this.mine = {
+      login,
+      id: localId(email !== "" ? email : login),
+      avatarUrl: "",
+      verified: false
+    };
+    return this.mine;
   }
 
   dispose(): void {
