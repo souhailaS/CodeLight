@@ -456,3 +456,108 @@ describe("renames read the annotation file rather than trusting what is loaded",
     assert.deepEqual(read(other), []);
   });
 });
+
+describe("renames across folders that overlap", () => {
+  it("leaves a note that moved with the file alone when another one lands on it", async () => {
+    const inner = nodePath.join(root, "packages", "inner");
+    fs.mkdirSync(nodePath.join(inner, ".vscode"), { recursive: true });
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "root", index: 0 },
+      { uri: Uri.file(inner), name: "inner", index: 1 }
+    ];
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("outer", "packages/inner/src/a.ts")));
+    assert.ok(await store.add(annotation("inner", "src/a.ts", inner)));
+    await watcher.follow([
+      { oldUri: at("packages/inner/src/a.ts"), newUri: at("top/a.ts") }
+    ]);
+    assert.equal(store.byId("outer")?.file, "top/a.ts");
+    assert.equal(store.byId("outer")?.orphaned, undefined);
+    assert.equal(store.byId("inner")?.orphaned, undefined);
+  });
+
+  it("stays quiet about a conflict when the rename touches no note", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      ["<<<<<<< HEAD", "{}", "=======", "{}", ">>>>>>> branch"].join("\n")
+    );
+    await store.refresh();
+    assert.equal(await watcher.follow([{ oldUri: at("other/x.ts"), newUri: at("other/y.ts") }]), 0);
+    assert.equal(
+      warnings().some((line) => line.includes("still point at the old path")),
+      false,
+      warnings().join("|")
+    );
+  });
+
+  it("blames the conflict when the folder the file arrives in has one", async () => {
+    const other = second();
+    fs.writeFileSync(
+      nodePath.join(other, ".vscode", "codelight.json"),
+      ["<<<<<<< HEAD", "{}", "=======", "{}", ">>>>>>> branch"].join("\n")
+    );
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    await watcher.follow([
+      { oldUri: at("src/a.ts"), newUri: Uri.file(nodePath.join(other, "src/a.ts")) }
+    ]);
+    assert.ok(
+      warnings().some((line) => line.includes("merge conflict")),
+      warnings().join("|")
+    );
+    assert.equal(
+      warnings().some((line) => line.includes("could not write the annotation file")),
+      false
+    );
+    assert.equal(store.byId("one")?.file, "src/a.ts");
+  });
+
+  it("keeps a note inside the folder an earlier entry moved it into", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a/x.ts")));
+    await watcher.follow([
+      { oldUri: at("src/a"), newUri: at("top/a") },
+      { oldUri: at("src"), newUri: at("lib") }
+    ]);
+    assert.equal(store.byId("one")?.file, "top/a/x.ts");
+  });
+
+  it("strands the notes on a file written over even when the mover was already there", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/b.ts")));
+    onDisk(root, [annotation("one", "src/b.ts"), annotation("two", "src/b.ts")]);
+    await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/b.ts") }]);
+    const held = read(root);
+    assert.equal(held.find((entry) => entry.id === "two")?.orphaned, true);
+    assert.equal(held.find((entry) => entry.id === "one")?.orphaned, undefined);
+  });
+
+  it("says so when the write that only stranded a note failed", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/b.ts")));
+    onDisk(root, [annotation("one", "src/b.ts"), annotation("two", "src/b.ts")]);
+    faults.writeCode = "EIO";
+    await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/b.ts") }]);
+    faults.writeCode = undefined;
+    assert.ok(
+      warnings().some((line) => line.includes("could not write the annotation file")),
+      warnings().join("|")
+    );
+  });
+
+  it("does not count a note that had already lost its text as left behind", async () => {
+    const { store, watcher } = await rig();
+    const gone = annotation("one", "src/a.ts");
+    gone.orphaned = true;
+    assert.ok(await store.add(gone));
+    assert.equal(
+      await watcher.follow([{ oldUri: at("src/a.ts"), newUri: Uri.file("/elsewhere/a.ts") }]),
+      0
+    );
+    assert.deepEqual(warnings(), []);
+  });
+});

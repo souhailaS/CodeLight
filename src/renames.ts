@@ -39,7 +39,7 @@ function resolve(
 ): { file: string; out: string | undefined } {
   let landed = file;
   for (const entry of sorted) {
-    if (!within(file, entry.from)) {
+    if (!within(file, entry.from) || !within(landed, entry.from)) {
       continue;
     }
     if (entry.target === undefined) {
@@ -108,9 +108,21 @@ export class RenameWatcher implements vscode.Disposable {
     let stuck = 0;
     let conflicted = 0;
     let doubled = 0;
+    const plans = new Map<string, Entry[]>();
+    const going = new Set<string>();
     for (const [key, list] of byFolder) {
       const sorted = [...list].sort((a, b) => b.from.length - a.from.length);
-      const result = await this.applyTo(key, sorted);
+      plans.set(key, sorted);
+      for (const annotation of this.store.storeAt(key)?.all ?? []) {
+        const { file, out } = resolve(annotation.file, sorted, key);
+        if (out === "" || (out === undefined && file === annotation.file)) {
+          continue;
+        }
+        going.add(annotation.id);
+      }
+    }
+    for (const [key, sorted] of plans) {
+      const result = await this.applyTo(key, sorted, going);
       moved += result.moved;
       stranded += result.stranded;
       stuck += result.stuck;
@@ -144,7 +156,8 @@ export class RenameWatcher implements vscode.Disposable {
 
   private async applyTo(
     key: string,
-    sorted: Entry[]
+    sorted: Entry[],
+    going: ReadonlySet<string>
   ): Promise<{ moved: number; stranded: number; stuck: number; conflicted: number; doubled: number }> {
     const folder = this.store.storeAt(key);
     if (!folder) {
@@ -154,7 +167,9 @@ export class RenameWatcher implements vscode.Disposable {
       annotation,
       ...resolve(annotation.file, sorted, key)
     }));
-    const stranded = plan.filter((entry) => entry.out === "").length;
+    const stranded = plan.filter(
+      (entry) => entry.out === "" && entry.annotation.orphaned !== true
+    ).length;
     const leaving = new Map<string, { file: string; target: string }>();
     for (const entry of plan) {
       if (entry.out !== undefined && entry.out !== "") {
@@ -173,23 +188,27 @@ export class RenameWatcher implements vscode.Disposable {
     if (wanted.size > 0) {
       let count = 0;
       let ran = false;
+      let applied = false;
       const done = await this.store.transaction(key, (annotations) => {
         ran = true;
         count = 0;
         const landing = new Set<string>();
         for (const [id, file] of wanted) {
           const current = annotations.get(id);
-          if (!current || current.file === file) {
+          if (!current) {
+            continue;
+          }
+          landing.add(comparable(file));
+          if (current.file === file) {
             continue;
           }
           annotations.set(id, { ...current, file });
-          landing.add(comparable(file));
           count += 1;
         }
         let orphaned = false;
         for (const [id, annotation] of annotations) {
           if (
-            wanted.has(id) ||
+            going.has(id) ||
             annotation.orphaned === true ||
             !landing.has(comparable(annotation.file))
           ) {
@@ -198,11 +217,12 @@ export class RenameWatcher implements vscode.Disposable {
           annotations.set(id, { ...annotation, orphaned: true });
           orphaned = true;
         }
-        return count > 0 || orphaned;
+        applied = count > 0 || orphaned;
+        return applied;
       });
       if (done) {
         moved += count;
-      } else if (!ran || count > 0) {
+      } else if (!ran || applied) {
         stuck = 1;
       }
     }
@@ -225,38 +245,45 @@ export class RenameWatcher implements vscode.Disposable {
           byTarget.set(target, [...(byTarget.get(target) ?? []), annotation]);
         }
       }
-      const landed = await this.land(byTarget);
+      const { landed, stuckOn } = await this.land(byTarget, going);
       if (landed.size > 0) {
+        let held = 0;
         const cleared = await this.store.transaction(key, (annotations) => {
-          let removed = false;
+          held = 0;
           for (const id of landed) {
-            removed = annotations.delete(id) || removed;
+            held += annotations.delete(id) ? 1 : 0;
           }
-          return removed;
+          return held > 0;
         });
-        if (cleared) {
+        if (cleared || held === 0) {
           moved += landed.size;
         } else {
           doubled = landed.size;
         }
       }
       if (landed.size < carry.size) {
+        if (stuckOn) {
+          return { moved, stranded, stuck: 0, conflicted: 1, doubled };
+        }
         stuck = 1;
       }
     }
-    const conflicted = folder.conflicted ? 1 : 0;
+    const conflicted = folder.conflicted && (wanted.size > 0 || leaving.size > 0) ? 1 : 0;
     return { moved, stranded, stuck: conflicted === 1 ? 0 : stuck, conflicted, doubled };
   }
 
-  private async land(byTarget: Map<string, Annotation[]>): Promise<Set<string>> {
+  private async land(
+    byTarget: Map<string, Annotation[]>,
+    going: ReadonlySet<string>
+  ): Promise<{ landed: Set<string>; stuckOn: boolean }> {
     const landed = new Set<string>();
+    let stuckOn = false;
     for (const [target, list] of byTarget) {
       const arriving = new Set(list.map((entry) => comparable(entry.file)));
-      const ids = new Set(list.map((entry) => entry.id));
       const done = await this.store.transaction(target, (annotations) => {
         for (const [id, annotation] of annotations) {
           if (
-            ids.has(id) ||
+            going.has(id) ||
             annotation.orphaned === true ||
             !arriving.has(comparable(annotation.file))
           ) {
@@ -273,9 +300,11 @@ export class RenameWatcher implements vscode.Disposable {
         for (const entry of list) {
           landed.add(entry.id);
         }
+      } else if (this.store.storeAt(target)?.conflicted === true) {
+        stuckOn = true;
       }
     }
-    return landed;
+    return { landed, stuckOn };
   }
 
   dispose(): void {
