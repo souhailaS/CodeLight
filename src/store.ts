@@ -85,11 +85,25 @@ export class AnnotationStore implements vscode.Disposable {
     if (!store) {
       return detail;
     }
-    const name = vscode.workspace.getWorkspaceFolder(store.rootUri)?.name;
-    if (!name) {
-      return detail;
-    }
+    const name = this.nameOf(store);
     return detail === "" ? name : `${name} · ${detail}`;
+  }
+
+  private nameOf(store: FolderStore): string {
+    const parts = store.rootUri.path.split("/").filter((part) => part !== "");
+    const own = parts[parts.length - 1] ?? store.rootUri.toString();
+    const name = vscode.workspace.getWorkspaceFolder(store.rootUri)?.name ?? own;
+    const shared = this.folders.some(
+      (other) =>
+        other.key !== store.key &&
+        (vscode.workspace.getWorkspaceFolder(other.rootUri)?.name ??
+          other.rootUri.path.split("/").filter((part) => part !== "").pop()) === name
+    );
+    if (!shared) {
+      return name;
+    }
+    const parent = parts[parts.length - 2];
+    return parent === undefined ? name : `${parent}/${name}`;
   }
 
   rootFor(target: vscode.Uri): vscode.Uri | undefined {

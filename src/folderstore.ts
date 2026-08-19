@@ -5,7 +5,7 @@ import { inspectTarget, TEMPORARY_NAME, writeThroughTemporary } from "./atomic";
 import { mergeSides } from "./conflict";
 import { Annotation, hasConflict, parseStore, serializeStore } from "./model";
 import { readStorageMode } from "./palette";
-import { exists, isMissingFile, statFile, STORE_PATTERN, storeUri } from "./paths";
+import { exists, isMissingFile, pathLabel, statFile, STORE_PATTERN, storeUri } from "./paths";
 
 const RELOAD_DEBOUNCE_MS = 150;
 const MAX_STORE_BYTES = 64 * 1024 * 1024;
@@ -186,13 +186,13 @@ export class FolderStore implements vscode.Disposable {
     }
     if (chosen.duplicate === "yes") {
       void vscode.window.showWarningMessage(
-        `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. Remove the one you do not want before converting.`
+        `CodeLight found both ${pathLabel(files.plain)} and ${pathLabel(files.compressed)}. Remove the one you do not want before converting.`
       );
       return false;
     }
     if (chosen.duplicate === "unknown") {
       void vscode.window.showWarningMessage(
-        `CodeLight could not check both annotation files, so it left ${chosen.target.fsPath} alone.`
+        `CodeLight could not check both annotation files, so it left ${pathLabel(chosen.target)} alone.`
       );
       return false;
     }
@@ -208,14 +208,14 @@ export class FolderStore implements vscode.Disposable {
     const info = await inspectTarget(source);
     if (info?.shared) {
       void vscode.window.showWarningMessage(
-        `CodeLight left ${source.fsPath} alone because it is a symlink or has another name pointing at it. Converting it would leave that other name behind.`
+        `CodeLight left ${pathLabel(source)} alone because it is a symlink or has another name pointing at it. Converting it would leave that other name behind.`
       );
       return false;
     }
     const destination = isCompressed(source) ? files.plain : files.compressed;
     const question = isCompressed(destination)
-      ? `Convert ${source.fsPath} into ${destination.fsPath}? The compressed file is much smaller, but git cannot diff or merge it.`
-      : `Convert ${source.fsPath} into ${destination.fsPath}? The plain file is larger, and git can diff and merge it again.`;
+      ? `Convert ${pathLabel(source)} into ${pathLabel(destination)}? The compressed file is much smaller, but git cannot diff or merge it.`
+      : `Convert ${pathLabel(source)} into ${pathLabel(destination)}? The plain file is larger, and git can diff and merge it again.`;
     const answer = await vscode.window.showWarningMessage(question, { modal: true }, "Convert");
     if (answer !== "Convert") {
       return false;
@@ -240,7 +240,7 @@ export class FolderStore implements vscode.Disposable {
         return false;
       }
       if (disk.status === "missing") {
-        void vscode.window.showWarningMessage(`CodeLight could not find ${source.fsPath} any more.`);
+        void vscode.window.showWarningMessage(`CodeLight could not find ${pathLabel(source)} any more.`);
         return false;
       }
       const taken = await this.probe(destination);
@@ -249,7 +249,7 @@ export class FolderStore implements vscode.Disposable {
       }
       if (taken) {
         void vscode.window.showWarningMessage(
-          `CodeLight left ${source.fsPath} alone because ${destination.fsPath} already exists.`
+          `CodeLight left ${pathLabel(source)} alone because ${pathLabel(destination)} already exists.`
         );
         return false;
       }
@@ -257,7 +257,7 @@ export class FolderStore implements vscode.Disposable {
         await this.writeStore(destination, disk.raw);
       } catch (error) {
         this.reportFailure(
-          `CodeLight could not save annotations to ${destination.fsPath}. ${describe(error)}`
+          `CodeLight could not save annotations to ${pathLabel(destination)}. ${describe(error)}`
         );
         return false;
       }
@@ -265,7 +265,7 @@ export class FolderStore implements vscode.Disposable {
       if (written.status !== "ok" || written.raw !== disk.raw) {
         await this.discard(destination);
         this.reportFailure(
-          `CodeLight could not read back ${destination.fsPath}, so ${source.fsPath} is left as it was.`
+          `CodeLight could not read back ${pathLabel(destination)}, so ${pathLabel(source)} is left as it was.`
         );
         return false;
       }
@@ -281,7 +281,7 @@ export class FolderStore implements vscode.Disposable {
       this.lastSerialized = disk.raw;
       this.reportedFailure = undefined;
       this.emitter.fire();
-      void vscode.window.showInformationMessage(`CodeLight now stores annotations in ${destination.fsPath}.`);
+      void vscode.window.showInformationMessage(`CodeLight now stores annotations in ${pathLabel(destination)}.`);
       return true;
     });
     return converted;
@@ -310,7 +310,7 @@ export class FolderStore implements vscode.Disposable {
       const stat = await statFile(target);
       return { status: "ok", present: stat !== undefined, mtime: stat ? stat.mtime : 0 };
     } catch (error) {
-      return { status: "error", message: `CodeLight could not check ${target.fsPath}. ${describe(error)}` };
+      return { status: "error", message: `CodeLight could not check ${pathLabel(target)}. ${describe(error)}` };
     }
   }
 
@@ -410,7 +410,7 @@ export class FolderStore implements vscode.Disposable {
       try {
         await this.writeStore(target, content);
       } catch (error) {
-        this.reportFailure(`CodeLight could not save annotations to ${target.fsPath}. ${describe(error)}`);
+        this.reportFailure(`CodeLight could not save annotations to ${pathLabel(target)}. ${describe(error)}`);
         this.scheduleReload();
         return false;
       }
@@ -440,7 +440,7 @@ export class FolderStore implements vscode.Disposable {
       if (isMissingFile(error)) {
         return { status: "missing" };
       }
-      return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
+      return { status: "error", message: `CodeLight could not read ${pathLabel(target)}. ${describe(error)}` };
     }
     try {
       if (hasConflict(raw)) {
@@ -456,7 +456,7 @@ export class FolderStore implements vscode.Disposable {
         source: target
       };
     } catch (error) {
-      return { status: "error", message: `CodeLight could not read ${target.fsPath}. ${describe(error)}` };
+      return { status: "error", message: `CodeLight could not read ${pathLabel(target)}. ${describe(error)}` };
     }
   }
 
@@ -550,7 +550,7 @@ export class FolderStore implements vscode.Disposable {
     try {
       return await exists(target);
     } catch (error) {
-      this.reportFailure(`CodeLight could not check ${target.fsPath}. ${describe(error)}`);
+      this.reportFailure(`CodeLight could not check ${pathLabel(target)}. ${describe(error)}`);
       return undefined;
     }
   }
@@ -613,7 +613,7 @@ export class FolderStore implements vscode.Disposable {
       if (isMissingFile(error)) {
         return true;
       }
-      this.reportFailure(`CodeLight could not remove ${previous.fsPath}. ${describe(error)}`);
+      this.reportFailure(`CodeLight could not remove ${pathLabel(previous)}. ${describe(error)}`);
       return false;
     }
     return true;
@@ -634,7 +634,7 @@ export class FolderStore implements vscode.Disposable {
   private reportConflict(target: vscode.Uri): void {
     this.inConflict = true;
     this.emitter.fire();
-    const message = `CodeLight cannot read ${target.fsPath} because it has an unresolved merge conflict.`;
+    const message = `CodeLight cannot read ${pathLabel(target)} because it has an unresolved merge conflict.`;
     if (this.reportedFailure === message) {
       return;
     }
@@ -679,7 +679,7 @@ export class FolderStore implements vscode.Disposable {
         if (isMissingFile(error)) {
           return "skipped";
         }
-        this.reportFailure(`CodeLight could not read ${target.fsPath}. ${describe(error)}`);
+        this.reportFailure(`CodeLight could not read ${pathLabel(target)}. ${describe(error)}`);
         return "skipped";
       }
       if (!hasConflict(raw)) {
@@ -689,7 +689,7 @@ export class FolderStore implements vscode.Disposable {
       const merged = mergeSides(raw);
       if (!merged) {
         void vscode.window.showWarningMessage(
-          `CodeLight could not make sense of the conflict in ${target.fsPath}, so it left the file alone. Resolve it by hand.`
+          `CodeLight could not make sense of the conflict in ${pathLabel(target)}, so it left the file alone. Resolve it by hand.`
         );
         return "stuck";
       }
@@ -697,7 +697,7 @@ export class FolderStore implements vscode.Disposable {
       try {
         await this.writeStore(target, content);
       } catch (error) {
-        this.reportFailure(`CodeLight could not save ${target.fsPath}. ${describe(error)}`);
+        this.reportFailure(`CodeLight could not save ${pathLabel(target)}. ${describe(error)}`);
         return "stuck";
       }
       if (generation !== this.generation) {
@@ -711,7 +711,7 @@ export class FolderStore implements vscode.Disposable {
         ? ""
         : " Git left no record of what the file held before, so a note either side deleted is back.";
       void vscode.window.showInformationMessage(
-        `CodeLight merged the notes in ${target.fsPath}, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.${gone}${guess} Stage the file with git add once you are happy with it.`
+        `CodeLight merged the notes in ${pathLabel(target)}, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.${gone}${guess} Stage the file with git add once you are happy with it.`
       );
       return "merged";
     }).then(async (outcome) => {
@@ -728,7 +728,7 @@ export class FolderStore implements vscode.Disposable {
     }
     this.reportedInPlace = true;
     void vscode.window.showWarningMessage(
-      `CodeLight saved ${target.fsPath} in place because it cannot create a temporary file beside it. An interrupted save could truncate the store.`
+      `CodeLight saved ${pathLabel(target)} in place because it cannot create a temporary file beside it. An interrupted save could truncate the store.`
     );
   }
 
@@ -745,7 +745,7 @@ export class FolderStore implements vscode.Disposable {
     }
     this.reportedDuplicate = target.toString();
     void vscode.window.showWarningMessage(
-      `CodeLight found both ${files.plain.fsPath} and ${files.compressed.fsPath}. It is using ${target.fsPath} and leaving the other file alone.`
+      `CodeLight found both ${pathLabel(files.plain)} and ${pathLabel(files.compressed)}. It is using ${pathLabel(target)} and leaving the other file alone.`
     );
   }
 
@@ -759,7 +759,7 @@ export class FolderStore implements vscode.Disposable {
     }
     const label = dropped === 1 ? "entry" : "entries";
     void vscode.window.showWarningMessage(
-      `CodeLight skipped ${dropped} unreadable ${label} in ${target.fsPath}. They stay in the file, though CodeLight moves them to the end when it saves.`
+      `CodeLight skipped ${dropped} unreadable ${label} in ${pathLabel(target)}. They stay in the file, though CodeLight moves them to the end when it saves.`
     );
   }
 

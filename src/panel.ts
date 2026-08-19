@@ -262,6 +262,12 @@ export class PanelCommands {
     }
     try {
       const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+      if (annotation.orphaned === true) {
+        void vscode.window.showWarningMessage(
+          "The text that highlight marked is gone from the file, so it opened the file without jumping."
+        );
+        return;
+      }
       if (this.live.detachedIn(document).has(annotationId)) {
         void vscode.window.showWarningMessage(
           "CodeLight cannot find the text that highlight marks in this version of the file, so it opened the file without jumping."
@@ -282,18 +288,29 @@ export class PanelCommands {
       void vscode.window.showInformationMessage("CodeLight has no notes to search yet.");
       return;
     }
+    const detached = this.detachedByFile();
     const items = notes
       .map((annotation) => ({
         label: plain(snippet(annotation)),
-        description: plain(this.describe(annotation)),
+        where: this.store.label(annotation.root, annotation.file),
+        description: plain(this.describe(annotation, detached)),
         detail: plain(
-          annotation.comments
-            .map((comment) => `@${comment.author.login} ${trim(comment.body, 120)}`)
-            .join(" · ")
+          trim(
+            annotation.comments
+              .map((comment) => `@${comment.author.login} ${trim(comment.body, 120)}`)
+              .join(" · "),
+            240
+          )
         ),
         annotation
       }))
-      .sort((a, b) => (a.description === b.description ? 0 : a.description < b.description ? -1 : 1));
+      .sort((a, b) =>
+        a.where === b.where
+          ? a.annotation.range.startLine - b.annotation.range.startLine
+          : a.where < b.where
+            ? -1
+            : 1
+      );
     const filtered = this.tree.activeFilter !== undefined;
     const picked = await vscode.window.showQuickPick(items, {
       title: "CodeLight",
@@ -308,23 +325,34 @@ export class PanelCommands {
     }
   }
 
-  private describe(annotation: Annotation): string {
+  private describe(annotation: Annotation, detached: Map<string, ReadonlySet<string>>): string {
     const where = this.store.label(annotation.root, annotation.file);
-    const parts = [where, `@${annotation.author.login}`];
+    const parts = [`${where}:${annotation.range.startLine + 1}`, `@${annotation.author.login}`];
     if (annotation.orphaned === true) {
       parts.push("text deleted");
-    } else if (this.unplaceable(annotation)) {
+    } else if (this.unplaceable(annotation, detached)) {
       parts.push("not in this version");
     }
     return parts.join(" · ");
   }
 
-  private unplaceable(annotation: Annotation): boolean {
+  private detachedByFile(): Map<string, ReadonlySet<string>> {
+    const found = new Map<string, ReadonlySet<string>>();
+    for (const document of vscode.workspace.textDocuments) {
+      if (this.store.relative(document.uri) === undefined) {
+        continue;
+      }
+      found.set(document.uri.toString(), this.live.detachedIn(document));
+    }
+    return found;
+  }
+
+  private unplaceable(
+    annotation: Annotation,
+    detached: Map<string, ReadonlySet<string>>
+  ): boolean {
     const uri = this.store.uriFor(annotation);
-    const document = uri
-      ? vscode.workspace.textDocuments.find((entry) => entry.uri.toString() === uri.toString())
-      : undefined;
-    return document !== undefined && this.live.detachedIn(document).has(annotation.id);
+    return uri !== undefined && (detached.get(uri.toString())?.has(annotation.id) ?? false);
   }
 
   async deleteAnnotation(node?: Node | string): Promise<void> {
