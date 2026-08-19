@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { Annotation } from "./model";
+import { toRelativePath } from "./paths";
 import { AnnotationStore } from "./store";
 
 interface Move {
@@ -21,45 +22,34 @@ export class RenameWatcher implements vscode.Disposable {
   }
 
   async follow(moves: readonly Move[]): Promise<number> {
-    const byFolder = new Map<string, Array<{ from: string; to: string; root: string }>>();
+    const byFolder = new Map<string, Array<{ from: string; to: string }>>();
     for (const move of moves) {
-      const holder = this.store.folderFor(move.oldUri);
-      const landing = this.store.folderFor(move.newUri);
-      if (!holder) {
-        continue;
+      for (const folder of this.store.foldersHolding(move.oldUri)) {
+        const from = toRelativePath(folder.rootUri, move.oldUri);
+        const to = toRelativePath(folder.rootUri, move.newUri);
+        if (from === undefined || to === undefined) {
+          continue;
+        }
+        byFolder.set(folder.key, [...(byFolder.get(folder.key) ?? []), { from, to }]);
       }
-      const from = this.store.relative(move.oldUri);
-      const to = landing ? this.store.relative(move.newUri) : undefined;
-      if (from === undefined) {
-        continue;
-      }
-      const key = holder.key;
-      byFolder.set(key, [
-        ...(byFolder.get(key) ?? []),
-        { from, to: to ?? "", root: landing?.key ?? "" }
-      ]);
     }
     let moved = 0;
     for (const [key, list] of byFolder) {
-      const staying = list.filter((entry) => entry.root === key && entry.to !== "");
-      if (staying.length === 0) {
-        continue;
-      }
+      let here = 0;
       const done = await this.store.transaction(key, (annotations) => {
-        let changed = false;
+        here = 0;
         for (const [id, annotation] of annotations) {
-          const hit = staying.find((entry) => within(annotation.file, entry.from));
+          const hit = list.find((entry) => within(annotation.file, entry.from));
           if (!hit) {
             continue;
           }
           annotations.set(id, { ...annotation, file: rename(annotation.file, hit.from, hit.to) });
-          changed = true;
-          moved += 1;
+          here += 1;
         }
-        return changed;
+        return here > 0;
       });
-      if (!done) {
-        moved = 0;
+      if (done) {
+        moved += here;
       }
     }
     return moved;

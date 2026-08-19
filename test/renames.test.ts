@@ -92,11 +92,55 @@ describe("notes after a rename", () => {
     assert.deepEqual(files(store), ["src/x.ts", "src/y.ts"]);
   });
 
-  it("leaves a note alone when the file left the workspace", async () => {
+  it("leaves a note where it was when the file left the workspace", async () => {
     const { store, watcher } = await rig();
     assert.ok(await store.add(annotation("one", "src/a.ts")));
-    assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: Uri.file("/elsewhere/a.ts") }]), 0);
+    assert.equal(
+      await watcher.follow([{ oldUri: at("src/a.ts"), newUri: Uri.file("/elsewhere/a.ts") }]),
+      0
+    );
     assert.deepEqual(files(store), ["src/a.ts"]);
+    assert.equal(store.byId("one")?.orphaned, undefined);
+  });
+
+  it("follows a file the inner folder and the outer folder both cover", async () => {
+    const inner = nodePath.join(root, "packages", "inner");
+    fs.mkdirSync(nodePath.join(inner, ".vscode"), { recursive: true });
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "root", index: 0 },
+      { uri: Uri.file(inner), name: "inner", index: 1 }
+    ];
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("outer", "packages/inner/src/a.ts")));
+    assert.ok(await store.add(annotation("inner", "src/a.ts", inner)));
+    assert.equal(
+      await watcher.follow([
+        { oldUri: at("packages/inner/src/a.ts"), newUri: at("packages/inner/src/b.ts") }
+      ]),
+      2
+    );
+    assert.equal(store.byId("outer")?.file, "packages/inner/src/b.ts");
+    assert.equal(store.byId("inner")?.file, "src/b.ts");
+  });
+
+  it("counts only the notes it really moved", async () => {
+    const second = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-quiet-"));
+    fs.mkdirSync(nodePath.join(second, ".vscode"));
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "root", index: 0 },
+      { uri: Uri.file(second), name: "second", index: 1 }
+    ];
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.equal(
+      await watcher.follow([
+        { oldUri: at("src/a.ts"), newUri: at("src/c.ts") },
+        { oldUri: Uri.file(nodePath.join(second, "src/x.ts")), newUri: Uri.file(nodePath.join(second, "src/y.ts")) }
+      ]),
+      1
+    );
+    assert.deepEqual(files(store), ["src/c.ts"]);
+    fs.rmSync(second, { recursive: true, force: true });
   });
 
   it("ignores a file no folder holds", async () => {
