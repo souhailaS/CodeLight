@@ -243,12 +243,13 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage("CodeLight needs an open folder.");
         return;
       }
-      const account = identity.identity;
+      const account = identity.identity ?? (await identity.local());
       const count = store.all.length;
+      const who = account.verified
+        ? `signed in as ${account.login}`
+        : `signing notes ${account.login}, the name git knows you by`;
       void vscode.window.showInformationMessage(
-        `CodeLight tracks ${count} annotation${count === 1 ? "" : "s"}, ${
-          account ? `signed in as ${account.login}` : "and you are not signed in"
-        }.`
+        `CodeLight tracks ${count} annotation${count === 1 ? "" : "s"}, ${who}.`
       );
     })
   );

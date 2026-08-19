@@ -173,7 +173,7 @@ export class ThreadView implements vscode.Disposable {
     }
     const author = await this.identity.require();
     if (author) {
-      this.suggestSignIn(reply.thread.uri, author);
+      void this.suggestSignIn(reply.thread.uri, author);
     }
     if (!author) {
       const rescued = await rescue(body);
@@ -266,12 +266,12 @@ export class ThreadView implements vscode.Disposable {
     this.sync();
   }
 
-  private suggestSignIn(target: vscode.Uri, author: Identity): void {
+  private async suggestSignIn(target: vscode.Uri, author: Identity): Promise<void> {
     if (author.verified || this.askedToSignIn) {
       return;
     }
     const store = this.store.storeAt(target)?.location;
-    if (!store || this.sharing.known(store) !== "tracked") {
+    if (!store || (await this.sharing.of(store)) !== "tracked") {
       return;
     }
     this.askedToSignIn = true;
@@ -814,7 +814,7 @@ export class ThreadView implements vscode.Disposable {
   }
 
   private fill(thread: vscode.CommentThread, annotation: Annotation): void {
-    const me = this.identity.identity?.id;
+    const mine = (author: { id: string }) => this.identity.owns(author as never);
     const editing = new Map<string, ThreadComment>();
     for (const entry of thread.comments) {
       if (entry instanceof ThreadComment && entry.mode === vscode.CommentMode.Editing) {
@@ -838,7 +838,7 @@ export class ThreadView implements vscode.Disposable {
         body,
         vscode.CommentMode.Preview,
         authorInfo(comment),
-        comment.author.id === me ? "mine" : "theirs",
+        mine(comment.author) ? "mine" : "theirs",
         parseDate(comment.createdAt)
       );
     });

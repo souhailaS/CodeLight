@@ -39,7 +39,7 @@ export class CommentCommands {
     if (!author) {
       return;
     }
-    if (picked.comment.author.id !== author.id) {
+    if (!this.identity.owns(picked.comment.author)) {
       void vscode.window.showWarningMessage(
         `That comment belongs to ${picked.comment.author.login}. You can only edit your own.`
       );
@@ -69,7 +69,7 @@ export class CommentCommands {
     if (!author) {
       return;
     }
-    if (picked.comment.author.id !== author.id) {
+    if (!this.identity.owns(picked.comment.author)) {
       void vscode.window.showWarningMessage(
         `That comment belongs to ${picked.comment.author.login}. You can only delete your own.`
       );

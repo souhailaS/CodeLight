@@ -108,7 +108,6 @@ export class MarkerMode implements vscode.Disposable {
     const spans = placed.spans;
     const matches: string[] = [];
     for (const range of ranges) {
-      const me = this.identity.identity?.id;
       const hit = this.store.forFile(editor.document.uri).find((annotation) => {
         if (
           annotation.orphaned === true ||
@@ -117,7 +116,7 @@ export class MarkerMode implements vscode.Disposable {
         ) {
           return false;
         }
-        if (me === undefined || annotation.author.id !== me) {
+        if (!this.identity.owns(annotation.author)) {
           return false;
         }
         return this.live.rangeFor(editor.document, annotation, spans).isEqual(range);

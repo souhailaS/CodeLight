@@ -85,7 +85,7 @@ async function build(): Promise<{
   const store = new AnnotationStore();
   await store.initialize();
   const live = new LiveRanges(store);
-  const identity = new IdentityProvider();
+  const identity = new IdentityProvider(async (args) => (args[1] === "user.name" ? "ada" : "ada@b.c"));
   const visibility = new Visibility();
   const document = new TextDocument(Uri.file(nodePath.join(root, "src/a.ts")), SOURCE);
   workspace.textDocuments = [document];
@@ -213,6 +213,73 @@ describe("saveEdit", () => {
     }
     assert.equal(store.byId("a1")?.comments[0].body, "first note");
     assert.equal(clipboard.text, "the edited text");
+  });
+});
+
+describe("who a comment is shown as", () => {
+  it("offers edit and delete on a note you wrote without signing in", async () => {
+    authentication.session = undefined;
+    const { store, identity, view } = await build();
+    const me = await identity.local();
+    writeStore([annotation("a1", [comment("c1", "first note")])]);
+    const stored = JSON.parse(
+      fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8")
+    ) as { annotations: Array<{ comments: Array<{ author: unknown }> }> };
+    stored.annotations[0].comments[0].author = { login: me.login, id: me.id };
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      JSON.stringify(stored, null, 2)
+    );
+    await store.refresh();
+    void view;
+    const entry = threadsOf()[0].comments[0] as ThreadComment;
+    assert.ok(me.id.startsWith("local:"));
+    assert.equal(entry.contextValue, "mine");
+  });
+
+  it("does not offer them on someone else's note", async () => {
+    authentication.session = undefined;
+    const { store, view } = await build();
+    writeStore([annotation("a1", [comment("c1", "first note")])]);
+    const stored = JSON.parse(
+      fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8")
+    ) as { annotations: Array<{ comments: Array<{ author: unknown }> }> };
+    stored.annotations[0].comments[0].author = { login: "bob", id: "local:someoneelse" };
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      JSON.stringify(stored, null, 2)
+    );
+    await store.refresh();
+    void view;
+    const entry = threadsOf()[0].comments[0] as ThreadComment;
+    assert.equal(entry.contextValue, "theirs");
+  });
+
+  it("shows no avatar for a name git knows rather than a broken one", async () => {
+    const { store, view } = await build();
+    writeStore([annotation("a1", [comment("c1", "first note")])]);
+    const stored = JSON.parse(
+      fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8")
+    ) as { annotations: Array<{ comments: Array<{ author: { id: string } }> }> };
+    stored.annotations[0].comments[0].author.id = "local:abc123";
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      JSON.stringify(stored, null, 2)
+    );
+    await store.refresh();
+    void view;
+    const entry = threadsOf()[0].comments[0] as ThreadComment;
+    assert.equal((entry.author as { iconPath?: unknown }).iconPath, undefined);
+    assert.equal(entry.author.name, "ada");
+  });
+
+  it("keeps the github avatar for a numbered account", async () => {
+    const { store, view } = await build();
+    writeStore([annotation("a1", [comment("c1", "first note")])]);
+    await store.refresh();
+    void view;
+    const entry = threadsOf()[0].comments[0] as ThreadComment;
+    assert.ok(String((entry.author as { iconPath?: { toString(): string } }).iconPath).includes("avatars"));
   });
 });
 

@@ -15,11 +15,21 @@ export interface Identity extends Author {
 export type Asker = (args: string[]) => Promise<string | undefined>;
 
 function askGit(args: string[]): Promise<string | undefined> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  const cwd = folder && folder.uri.scheme === "file" ? folder.uri.fsPath : undefined;
   return new Promise((done) => {
-    execFile("git", args, { timeout: 3000 }, (error, out) => {
+    execFile("git", args, { cwd, timeout: 3000 }, (error, out) => {
       done(error ? undefined : out.trim());
     });
   });
+}
+
+function machine(): string {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return "someone";
+  }
 }
 
 function toIdentity(session: vscode.AuthenticationSession): Identity {
@@ -106,16 +116,35 @@ export class IdentityProvider implements vscode.Disposable {
     if (this.mine) {
       return this.mine;
     }
-    const name = (await this.ask(["config", "user.name"])) ?? "";
-    const email = (await this.ask(["config", "user.email"])) ?? "";
-    const login = name !== "" ? name : email !== "" ? email : os.userInfo().username;
+    const [name, email] = await Promise.all([
+      this.ask(["config", "user.name"]),
+      this.ask(["config", "user.email"])
+    ]);
+    const who = name ?? "";
+    const address = email ?? "";
+    const login = who !== "" ? who : address !== "" ? address : machine();
     this.mine = {
       login,
-      id: localId(email !== "" ? email : login),
+      id: localId(address !== "" ? address : `${os.hostname()}/${login}`),
       avatarUrl: "",
       verified: false
     };
+    if (!this.current) {
+      this.current = this.mine;
+      this.emitter.fire(this.mine);
+    }
     return this.mine;
+  }
+
+  owns(author: Author): boolean {
+    if (this.current?.id === author.id) {
+      return true;
+    }
+    return (
+      author.id.startsWith("local:") &&
+      this.mine !== undefined &&
+      author.id === this.mine.id
+    );
   }
 
   dispose(): void {
