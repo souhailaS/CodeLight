@@ -311,6 +311,48 @@ describe("stepping through the highlights of a file", () => {
     assert.equal(reads, 2);
   });
 
+  it("does not step in a file the reader closed", async () => {
+    const { navigation, editor } = await rig([annotation("a", 0, "one")]);
+    await navigation.step(true);
+    editor.document.isClosed = true;
+    (window as { activeTextEditor: unknown }).activeTextEditor = undefined;
+    window.visibleTextEditors = [];
+    messages.length = 0;
+    assert.equal(await navigation.step(true), false);
+    assert.ok(messages.some((entry) => entry.includes("Open a file")), messages.join("|"));
+  });
+
+  it("steps forward from the caret, not from the top of a selection", async () => {
+    const { navigation, editor } = await rig([
+      annotation("a", 0, "one"),
+      annotation("b", 2, "three")
+    ]);
+    editor.selections = [new Selection(new Position(0, 0), new Position(1, 0))];
+    await navigation.step(true);
+    assert.equal(editor.selection.start.line, 2);
+  });
+
+  it("never steps backwards on the way forward", async () => {
+    const wide = annotation("wide", 0, "one");
+    wide.range = { startLine: 0, startCharacter: 6, endLine: 2, endCharacter: 11 };
+    wide.anchor = { text: "one = 1;\nconst two = 2;\nconst three", before: "const ", after: " =" };
+    const inner = annotation("inner", 1, "two");
+    const { navigation, editor } = await rig([wide, inner]);
+    cursor(editor, 2, 0);
+    await navigation.step(true);
+    assert.ok(editor.selection.start.line >= 2 || editor.selection.start.line === 0, status());
+    assert.equal(editor.selection.start.line === 1, false, status());
+  });
+
+  it("says which highlights it left out and why", async () => {
+    const gone = annotation("gone", 0, "one");
+    gone.orphaned = true;
+    const { navigation } = await rig([gone, annotation("here", 2, "three"), annotation("lost", 1, "absent")]);
+    await navigation.step(true);
+    assert.ok(status().includes("1 with the text deleted"), status());
+    assert.ok(status().includes("1 not in this version"), status());
+  });
+
   it("says to open a file when none is open", async () => {
     const { navigation } = await rig([annotation("a", 0, "one")]);
     (window as { activeTextEditor: unknown }).activeTextEditor = undefined;

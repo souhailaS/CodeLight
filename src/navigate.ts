@@ -18,13 +18,9 @@ function sameRange(one: vscode.Range, other: vscode.Range): boolean {
   return one.start.isEqual(other.start) && one.end.isEqual(other.end);
 }
 
-function holds(range: vscode.Range, position: vscode.Position): boolean {
-  return range.start.isBeforeOrEqual(position) && range.end.isAfterOrEqual(position);
-}
-
 export class Navigation implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
-  private cached: Stop[] | undefined;
+  private cached: { stops: Stop[]; gone: number; elsewhere: number } | undefined;
   private cacheKey = "";
   private tracked: vscode.TextEditor | undefined;
   private landedOn: { uri: string; position: vscode.Position; id: string } | undefined;
@@ -53,7 +49,7 @@ export class Navigation implements vscode.Disposable {
       void vscode.window.showInformationMessage("This file has no highlights.");
       return false;
     }
-    const stops = this.stopsIn(editor.document, all);
+    const { stops, gone, elsewhere } = this.stopsIn(editor.document, all);
     if (stops.length === 0) {
       void vscode.window.showWarningMessage(
         all.length === 1
@@ -68,7 +64,7 @@ export class Navigation implements vscode.Disposable {
     if (!landed) {
       return false;
     }
-    this.say(stops, all.length - stops.length, at, wrapped);
+    this.say(stops, gone, elsewhere, at, wrapped);
     return true;
   }
 
@@ -79,15 +75,15 @@ export class Navigation implements vscode.Disposable {
   ): { at: number; wrapped: boolean } {
     const selection = editor.selection;
     const left = this.left(stops, editor);
-    const here = left !== -1 ? left : stops.findIndex((stop) => sameRange(stop.range, selection));
-    const on = here !== -1 ? here : stops.findIndex((stop) => holds(stop.range, selection.start));
+    const on = left !== -1 ? left : stops.findIndex((stop) => sameRange(stop.range, selection));
     if (on !== -1) {
       const step = on + (forward ? 1 : -1);
       return { at: (step + stops.length) % stops.length, wrapped: step < 0 || step >= stops.length };
     }
+    const cursor = selection.active;
     const ahead = forward
-      ? stops.findIndex((stop) => stop.range.start.isAfterOrEqual(selection.start))
-      : stops.map((stop) => stop.range.start.isBefore(selection.start)).lastIndexOf(true);
+      ? stops.findIndex((stop) => stop.range.start.isAfter(cursor))
+      : stops.map((stop) => stop.range.start.isBefore(cursor)).lastIndexOf(true);
     if (ahead !== -1) {
       return { at: ahead, wrapped: false };
     }
@@ -140,26 +136,40 @@ export class Navigation implements vscode.Disposable {
   }
 
   private mappable(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
-    return editor !== undefined && this.store.relative(editor.document.uri) !== undefined;
+    return (
+      editor !== undefined &&
+      !editor.document.isClosed &&
+      this.store.relative(editor.document.uri) !== undefined
+    );
   }
 
-  private stopsIn(document: vscode.TextDocument, all: readonly Annotation[]): Stop[] {
+  private stopsIn(
+    document: vscode.TextDocument,
+    all: readonly Annotation[]
+  ): { stops: Stop[]; gone: number; elsewhere: number } {
     const key = `${document.uri.toString()}@${document.version}`;
     if (this.cacheKey === key && this.cached) {
       return this.cached;
     }
     const { spans, detached } = this.live.placedIn(document);
     const stops: Stop[] = [];
+    let gone = 0;
+    let elsewhere = 0;
     for (const annotation of all) {
-      if (annotation.orphaned === true || detached.has(annotation.id)) {
+      if (annotation.orphaned === true) {
+        gone += 1;
+        continue;
+      }
+      if (detached.has(annotation.id)) {
+        elsewhere += 1;
         continue;
       }
       stops.push({ annotation, range: this.live.rangeFor(document, annotation, spans) });
     }
     stops.sort(order);
-    this.cached = stops;
+    this.cached = { stops, gone, elsewhere };
     this.cacheKey = key;
-    return stops;
+    return this.cached;
   }
 
   private forget(): void {
@@ -167,12 +177,16 @@ export class Navigation implements vscode.Disposable {
     this.cacheKey = "";
   }
 
-  private say(stops: Stop[], skipped: number, at: number, wrapped: boolean): void {
+  private say(stops: Stop[], gone: number, elsewhere: number, at: number, wrapped: boolean): void {
     const where = `Highlight ${at + 1} of ${stops.length}`;
     const comments = stops[at].annotation.comments.length;
     const carried = comments === 0 ? "" : `, ${comments} comment${comments === 1 ? "" : "s"}`;
     const around = wrapped && stops.length > 1 ? ", back around" : "";
-    const left = skipped === 0 ? "" : `, ${skipped} not in this version`;
+    const missing = [
+      gone === 0 ? "" : `${gone} with the text deleted`,
+      elsewhere === 0 ? "" : `${elsewhere} not in this version`
+    ].filter((part) => part !== "");
+    const left = missing.length === 0 ? "" : `, ${missing.join(" and ")}`;
     const seen = this.visibility.visible ? "" : ", notes hidden";
     vscode.window.setStatusBarMessage(
       `$(bookmark) ${where}${carried}${around}${left}${seen}`,
