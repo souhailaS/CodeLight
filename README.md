@@ -35,7 +35,7 @@ Two commands decide whether the notes travel. **Keep the Notes Out of Git** adds
 
 If two of you annotate on different branches, git will leave a merge conflict in the annotation file. CodeLight says so rather than looking empty, and **Merge the Notes After a Conflict** puts both sides back together, keeping every note from each and the newer version of any note you both touched.
 
-Rename a file in VS Code and its notes go with it, whether you rename one file or a whole folder, and a file dragged into another folder of the workspace takes its notes into that folder's annotation file. A rename made outside the editor, `git mv` in a terminal for instance, is one VS Code does not report, so the notes stay on the old path, and so do the notes on a file moved right out of the workspace, which CodeLight tells you about.
+Rename a file in VS Code and its notes go with it, whether you rename one file or a whole folder, and a file dragged into another folder of the workspace takes its notes into that folder's annotation file. A rename made outside the editor, `git mv` in a terminal for instance, is one VS Code never reports, so the notes stay on the old path with nothing said about it. A file moved right out of the workspace leaves its notes behind too, and that one CodeLight does tell you about.
 
 Highlights follow your edits. Insert lines above one and it moves with the text. Delete the text it marks and CodeLight looks for it elsewhere in the file before giving up, and if the text comes back the highlight returns with it.
 

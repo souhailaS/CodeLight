@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { filesRenamed, resetFake, Uri, warnings, workspace } from "./fakevscode";
+import { faults, filesRenamed, resetFake, Uri, warnings, workspace } from "./fakevscode";
 import { Annotation } from "../src/model";
 import { RenameWatcher } from "../src/renames";
 import { AnnotationStore } from "../src/store";
@@ -291,7 +291,7 @@ describe("renames that are not a plain move inside one folder", () => {
     assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/c.ts") }]), 0);
     assert.equal(store.byId("one")?.file, "src/a.ts");
     assert.ok(
-      warnings().some((line) => line.includes("still point at the old path")),
+      warnings().some((line) => line.includes("has a merge conflict in it")),
       warnings().join("|")
     );
   });
@@ -329,5 +329,130 @@ describe("renames that are not a plain move inside one folder", () => {
     const before = fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8");
     assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/a.ts") }]), 0);
     assert.equal(fs.readFileSync(nodePath.join(root, ".vscode", "codelight.json"), "utf8"), before);
+  });
+});
+
+function onDisk(where: string, annotations: Annotation[]): void {
+  const wire = annotations.map(({ root: _root, ...rest }) => rest);
+  fs.writeFileSync(
+    nodePath.join(where, ".vscode", "codelight.json"),
+    `${JSON.stringify({ version: 1, annotations: wire }, null, 2)}\n`
+  );
+}
+
+function read(where: string): Annotation[] {
+  const file = nodePath.join(where, ".vscode", "codelight.json");
+  if (!fs.existsSync(file)) {
+    return [];
+  }
+  return (JSON.parse(fs.readFileSync(file, "utf8")) as { annotations: Annotation[] }).annotations;
+}
+
+describe("renames read the annotation file rather than trusting what is loaded", () => {
+  it("strands the notes the arriving file writes over in the other folder", async () => {
+    const other = second();
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/a.ts", other)));
+    assert.equal(
+      await watcher.follow([
+        { oldUri: at("src/a.ts"), newUri: Uri.file(nodePath.join(other, "src/a.ts")) }
+      ]),
+      1
+    );
+    const landed = read(other);
+    assert.equal(landed.length, 2);
+    assert.equal(landed.find((entry) => entry.id === "one")?.orphaned, undefined);
+    assert.equal(landed.find((entry) => entry.id === "two")?.orphaned, true);
+  });
+
+  it("carries the note the file holds, not the one in memory", async () => {
+    const other = second();
+    const { store, watcher } = await rig();
+    const entry = annotation("one", "src/a.ts");
+    assert.ok(await store.add(entry));
+    onDisk(root, [
+      {
+        ...entry,
+        comments: [
+          {
+            id: "c1",
+            author: { login: "ada", id: "42" },
+            body: "written by a colleague",
+            createdAt: "t",
+            updatedAt: "t"
+          }
+        ]
+      }
+    ]);
+    await watcher.follow([
+      { oldUri: at("src/a.ts"), newUri: Uri.file(nodePath.join(other, "src/a.ts")) }
+    ]);
+    assert.equal(read(other)[0].comments[0]?.body, "written by a colleague");
+    assert.deepEqual(read(root), []);
+  });
+
+  it("leaves a note alone when the file it is on is not the one that moved", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    onDisk(root, [annotation("victim", "src/c.ts")]);
+    assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/c.ts") }]), 0);
+    assert.equal(read(root).find((entry) => entry.id === "victim")?.orphaned, undefined);
+    assert.deepEqual(warnings(), []);
+  });
+
+  it("applies each entry of a batch to the path a note started on", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/b.ts")));
+    await watcher.follow([
+      { oldUri: at("src/a.ts"), newUri: at("src/b.ts") },
+      { oldUri: at("src/b.ts"), newUri: at("src/c.ts") }
+    ]);
+    assert.equal(store.byId("one")?.file, "src/b.ts");
+    assert.equal(store.byId("two")?.file, "src/c.ts");
+  });
+
+  it(
+    "strands a note the rename wrote over even when the two paths differ only in case",
+    { skip: process.platform !== "darwin" && process.platform !== "win32" },
+    async () => {
+      const { store, watcher } = await rig();
+      assert.ok(await store.add(annotation("one", "src/a.ts")));
+      assert.ok(await store.add(annotation("two", "src/B.ts")));
+      assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/b.ts") }]), 1);
+      assert.equal(store.byId("two")?.orphaned, true);
+    }
+  );
+
+  it("says it could not write when the write is the thing that failed", async () => {
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    faults.writeCode = "EIO";
+    assert.equal(await watcher.follow([{ oldUri: at("src/a.ts"), newUri: at("src/c.ts") }]), 0);
+    faults.writeCode = undefined;
+    assert.ok(
+      warnings().some((line) => line.includes("could not write the annotation file")),
+      warnings().join("|")
+    );
+    assert.equal(store.byId("one")?.file, "src/a.ts");
+  });
+
+  it("does not hand a note to another folder while the one it is in is conflicted", async () => {
+    const other = second();
+    const { store, watcher } = await rig();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    fs.writeFileSync(
+      nodePath.join(root, ".vscode", "codelight.json"),
+      ["<<<<<<< HEAD", "{}", "=======", "{}", ">>>>>>> branch"].join("\n")
+    );
+    await store.refresh();
+    assert.equal(
+      await watcher.follow([
+        { oldUri: at("src/a.ts"), newUri: Uri.file(nodePath.join(other, "src/a.ts")) }
+      ]),
+      0
+    );
+    assert.deepEqual(read(other), []);
   });
 });

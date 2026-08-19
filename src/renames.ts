@@ -39,7 +39,7 @@ function resolve(
 ): { file: string; out: string | undefined } {
   let landed = file;
   for (const entry of sorted) {
-    if (!within(landed, entry.from)) {
+    if (!within(file, entry.from)) {
       continue;
     }
     if (entry.target === undefined) {
@@ -71,7 +71,10 @@ export class RenameWatcher implements vscode.Disposable {
       () => this.apply(moves),
       () => this.apply(moves)
     );
-    this.queue = next;
+    this.queue = next.then(
+      () => 0,
+      () => 0
+    );
     return next;
   }
 
@@ -103,6 +106,7 @@ export class RenameWatcher implements vscode.Disposable {
     let moved = 0;
     let stranded = 0;
     let stuck = 0;
+    let conflicted = 0;
     let doubled = 0;
     for (const [key, list] of byFolder) {
       const sorted = [...list].sort((a, b) => b.from.length - a.from.length);
@@ -110,6 +114,7 @@ export class RenameWatcher implements vscode.Disposable {
       moved += result.moved;
       stranded += result.stranded;
       stuck += result.stuck;
+      conflicted += result.conflicted;
       doubled += result.doubled;
     }
     if (stranded > 0) {
@@ -124,6 +129,11 @@ export class RenameWatcher implements vscode.Disposable {
         "A note followed its file into another folder of this workspace, and is listed in both folders now, because CodeLight could not write the annotation file it came from."
       );
     }
+    if (conflicted > 0) {
+      void vscode.window.showWarningMessage(
+        "Notes on a renamed file still point at the old path, because the annotation file has a merge conflict in it. Merge the notes, then move the file again to bring them along."
+      );
+    }
     if (stuck > 0) {
       void vscode.window.showWarningMessage(
         "CodeLight could not write the annotation file, so notes on a renamed file still point at the old path. Rename it back, or fix the annotation file and move it again."
@@ -135,37 +145,54 @@ export class RenameWatcher implements vscode.Disposable {
   private async applyTo(
     key: string,
     sorted: Entry[]
-  ): Promise<{ moved: number; stranded: number; stuck: number; doubled: number }> {
+  ): Promise<{ moved: number; stranded: number; stuck: number; conflicted: number; doubled: number }> {
     const folder = this.store.storeAt(key);
     if (!folder) {
-      return { moved: 0, stranded: 0, stuck: 0, doubled: 0 };
+      return { moved: 0, stranded: 0, stuck: 0, conflicted: 0, doubled: 0 };
     }
     const plan = folder.all.map((annotation) => ({
       annotation,
       ...resolve(annotation.file, sorted, key)
     }));
     const stranded = plan.filter((entry) => entry.out === "").length;
-    const leaving = plan.filter((entry) => entry.out !== undefined && entry.out !== "");
-    const staying = plan.filter((entry) => entry.out === undefined && entry.file !== entry.annotation.file);
+    const leaving = new Map<string, { file: string; target: string }>();
+    for (const entry of plan) {
+      if (entry.out !== undefined && entry.out !== "") {
+        leaving.set(entry.annotation.id, { file: entry.file, target: entry.out });
+      }
+    }
+    const wanted = new Map<string, string>();
+    for (const entry of plan) {
+      if (entry.out === undefined && entry.file !== entry.annotation.file) {
+        wanted.set(entry.annotation.id, entry.file);
+      }
+    }
     let moved = 0;
     let stuck = 0;
-    if (staying.length > 0) {
-      const landing = new Set(staying.map((entry) => entry.file));
-      const going = new Set(staying.map((entry) => entry.annotation.id));
+    let doubled = 0;
+    if (wanted.size > 0) {
       let count = 0;
+      let ran = false;
       const done = await this.store.transaction(key, (annotations) => {
+        ran = true;
         count = 0;
-        for (const entry of staying) {
-          const current = annotations.get(entry.annotation.id);
-          if (!current) {
+        const landing = new Set<string>();
+        for (const [id, file] of wanted) {
+          const current = annotations.get(id);
+          if (!current || current.file === file) {
             continue;
           }
-          annotations.set(entry.annotation.id, { ...current, file: entry.file });
+          annotations.set(id, { ...current, file });
+          landing.add(comparable(file));
           count += 1;
         }
         let orphaned = false;
         for (const [id, annotation] of annotations) {
-          if (going.has(id) || annotation.orphaned === true || !landing.has(annotation.file)) {
+          if (
+            wanted.has(id) ||
+            annotation.orphaned === true ||
+            !landing.has(comparable(annotation.file))
+          ) {
             continue;
           }
           annotations.set(id, { ...annotation, orphaned: true });
@@ -175,13 +202,30 @@ export class RenameWatcher implements vscode.Disposable {
       });
       if (done) {
         moved += count;
-      } else {
+      } else if (!ran || count > 0) {
         stuck = 1;
       }
     }
-    let doubled = 0;
-    if (leaving.length > 0) {
-      const landed = await this.land(leaving);
+    if (leaving.size > 0 && !folder.conflicted) {
+      const carry = new Map<string, Annotation>();
+      await this.store.transaction(key, (annotations) => {
+        carry.clear();
+        for (const [id, where] of leaving) {
+          const current = annotations.get(id);
+          if (current) {
+            carry.set(id, { ...current, file: where.file });
+          }
+        }
+        return false;
+      });
+      const byTarget = new Map<string, Annotation[]>();
+      for (const [id, annotation] of carry) {
+        const target = leaving.get(id)?.target;
+        if (target !== undefined) {
+          byTarget.set(target, [...(byTarget.get(target) ?? []), annotation]);
+        }
+      }
+      const landed = await this.land(byTarget);
       if (landed.size > 0) {
         const cleared = await this.store.transaction(key, (annotations) => {
           let removed = false;
@@ -196,39 +240,38 @@ export class RenameWatcher implements vscode.Disposable {
           doubled = landed.size;
         }
       }
-      if (landed.size < leaving.length) {
+      if (landed.size < carry.size) {
         stuck = 1;
       }
     }
-    return { moved, stranded, stuck, doubled };
+    const conflicted = folder.conflicted ? 1 : 0;
+    return { moved, stranded, stuck: conflicted === 1 ? 0 : stuck, conflicted, doubled };
   }
 
-  private async land(
-    leaving: Array<{ annotation: Annotation; file: string; out: string | undefined }>
-  ): Promise<Set<string>> {
+  private async land(byTarget: Map<string, Annotation[]>): Promise<Set<string>> {
     const landed = new Set<string>();
-    const byTarget = new Map<string, Array<{ annotation: Annotation; file: string }>>();
-    for (const entry of leaving) {
-      const target = entry.out as string;
-      byTarget.set(target, [
-        ...(byTarget.get(target) ?? []),
-        { annotation: entry.annotation, file: entry.file }
-      ]);
-    }
     for (const [target, list] of byTarget) {
+      const arriving = new Set(list.map((entry) => comparable(entry.file)));
+      const ids = new Set(list.map((entry) => entry.id));
       const done = await this.store.transaction(target, (annotations) => {
+        for (const [id, annotation] of annotations) {
+          if (
+            ids.has(id) ||
+            annotation.orphaned === true ||
+            !arriving.has(comparable(annotation.file))
+          ) {
+            continue;
+          }
+          annotations.set(id, { ...annotation, orphaned: true });
+        }
         for (const entry of list) {
-          annotations.set(entry.annotation.id, {
-            ...entry.annotation,
-            file: entry.file,
-            root: target
-          });
+          annotations.set(entry.id, { ...entry, root: target });
         }
         return true;
       });
       if (done) {
         for (const entry of list) {
-          landed.add(entry.annotation.id);
+          landed.add(entry.id);
         }
       }
     }

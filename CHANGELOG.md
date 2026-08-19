@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-* **Notes follow a file you rename.** Renaming a file or a folder in VS Code used to strand every note on it, because the note remembers the path. The notes now move with it, including a file dragged into another folder of the workspace, whose notes move into that folder's annotation file. A file that leaves the workspace, and a rename VS Code never reports such as `git mv` in a terminal, both leave the notes where they were, and CodeLight says so rather than leaving you to find out. When a rename writes over a file that had notes of its own, those notes are marked as having lost their text instead of quietly describing content that is gone.
+* **Notes follow a file you rename.** Renaming a file or a folder in VS Code used to strand every note on it, because the note remembers the path. The notes now move with it, including a file dragged into another folder of the workspace, whose notes move into that folder's annotation file. A file that leaves the workspace leaves its notes behind, and CodeLight says so rather than leaving you to find out, as it does when the annotation file cannot be written or has a merge conflict in it. A rename VS Code never reports, `git mv` in a terminal for instance, is one CodeLight cannot see at all, so those notes stay on the old path silently. When a rename writes over a file that had notes of its own, those notes are marked as having lost their text instead of quietly describing content that is gone.
 
 ## 0.7.0
 
