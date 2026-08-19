@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+Two things that made CodeLight untrustworthy in exactly the situation it was built for, a team sharing notes through git.
+
+* **A merge conflict no longer wedges CodeLight.** Two people annotating on different branches always leave a conflict in the annotation file, even when they annotated different source files, and the markers land inside a note. CodeLight used to call that invalid JSON, keep whatever it had loaded, and then refuse every later save with a message that never mentioned the conflict. It now says what the file has, the panel says it too, and **Merge the Notes After a Conflict** puts both sides back together, keeping every note from each side, the newer version of any note you both touched, and the comments from both. When git left a record of what the file held before, a note either of you deleted stays deleted, and when git left no such record CodeLight says so rather than pretending.
+* **A highlight is no longer painted over code it cannot recognise.** Switching branches changes the file with no save, so CodeLight used to fall back to the stored offsets and mark whatever now sat there, silently. A note it cannot place is left unpainted, labelled "not in this version" in the panel and the cards, kept out of the comment threads and the marker, and above all never written back, so a save on the wrong branch can no longer rewrite a note onto code it was never about.
+* The two git commands and the panel now describe what CodeLight actually checked rather than what it hoped. Wording that claimed sharing, verification or a guarantee has been rewritten or removed throughout.
+* The status bar and the This File panel say whether the notes are ignored by git, committed, or not committed yet, and say nothing at all when they cannot tell.
+
 ## 0.6.1
 
 No change to what CodeLight does. This release exists so the tests that hold the last one in place ship with it.
