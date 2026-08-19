@@ -412,7 +412,7 @@ export class FileCommentsView implements vscode.WebviewViewProvider, vscode.Disp
       .filter((annotation) => annotation.comments.length > 0);
     const spans = annotations.length > 0 ? this.spansFor(document) : undefined;
     const detached =
-      annotations.length > 0 ? this.live.detachedIn(document) : new Set<string>();
+      annotations.length > 0 ? this.live.placedIn(document).detached : new Set<string>();
     const cards = annotations
       .map((annotation) => ({
         annotation,

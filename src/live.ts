@@ -74,7 +74,7 @@ export class LiveRanges implements vscode.Disposable {
       return { spans: new Map(), detached: new Set() };
     }
     const state = this.sync(document, this.store.forFile(document.uri));
-    return { spans: state.spans, detached: state.detached };
+    return { spans: state.spans, detached: new Set(state.detached) };
   }
 
   spansFor(document: vscode.TextDocument): SpanMap | undefined {
@@ -231,10 +231,8 @@ export class LiveRanges implements vscode.Disposable {
     if (annotation.anchor.text.length < MAX_ANCHOR_TEXT) {
       return { start: found.start, end: found.end };
     }
-    const wanted = Math.max(found.end - found.start, stored.end - stored.start);
-    const room = text.indexOf(annotation.anchor.after, found.end);
-    const limit = room < 0 || annotation.anchor.after === "" ? text.length : room;
-    return { start: found.start, end: Math.min(limit, found.start + wanted) };
+    const length = Math.max(found.end - found.start, stored.end - stored.start);
+    return { start: found.start, end: Math.min(text.length, found.start + length) };
   }
 
   private forget(document: vscode.TextDocument): void {

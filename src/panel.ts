@@ -258,6 +258,12 @@ export class PanelCommands {
     }
     try {
       const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+      if (this.live.detachedIn(document).has(annotationId)) {
+        void vscode.window.showWarningMessage(
+          "CodeLight cannot find the text that highlight marks in this version of the file, so it opened the file without jumping."
+        );
+        return;
+      }
       const range = this.live.rangeFor(document, annotation);
       editor.selection = new vscode.Selection(range.start, range.end);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
