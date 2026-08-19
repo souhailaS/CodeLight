@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { buildAnchor, findAnchor } from "./anchors";
 import { newId, timestamp } from "./ids";
-import { Identity, IdentityProvider } from "./identity";
+import { IdentityProvider } from "./identity";
+import { SignInNudge } from "./nudge";
 import { SharingState } from "./sharing";
 import { LiveRanges } from "./live";
 import { Anchor, Annotation, Comment, MAX_COMMENT_BODY } from "./model";
@@ -56,14 +57,14 @@ export class ThreadView implements vscode.Disposable {
   private lostTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly pending = new Map<vscode.CommentThread, { anchor: Anchor; version: number; length: number }>();
   private readonly disposables: vscode.Disposable[] = [];
-  private askedToSignIn = false;
 
   constructor(
     private readonly store: AnnotationStore,
     private readonly live: LiveRanges,
     private readonly identity: IdentityProvider,
     private readonly visibility: Visibility,
-    private readonly sharing = new SharingState()
+    sharing = new SharingState(),
+    private readonly nudge = new SignInNudge(store, sharing)
   ) {
     this.controller = vscode.comments.createCommentController("codelight", "CodeLight");
     this.controller.options = {
@@ -172,7 +173,6 @@ export class ThreadView implements vscode.Disposable {
       return;
     }
     const author = await this.identity.require();
-    void this.suggestSignIn(reply.thread.uri, author);
     const now = timestamp();
     const comment: Comment = {
       id: newId(),
@@ -209,6 +209,7 @@ export class ThreadView implements vscode.Disposable {
       if (created) {
         created.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
       }
+      void this.nudge.about(reply.thread.uri, author);
       return;
     }
     {
@@ -252,33 +253,8 @@ export class ThreadView implements vscode.Disposable {
     }
     this.drafts.delete(annotationId);
     reply.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    void this.nudge.about(reply.thread.uri, author);
     this.sync();
-  }
-
-  private async suggestSignIn(target: vscode.Uri, author: Identity): Promise<void> {
-    if (author.verified || this.askedToSignIn) {
-      return;
-    }
-    const store = this.store.storeAt(target)?.location;
-    const state = store ? await this.sharing.of(store) : "unknown";
-    if (state !== "tracked" && state !== "untracked") {
-      return;
-    }
-    this.askedToSignIn = true;
-    const committed =
-      state === "tracked"
-        ? "These notes are committed, so your colleagues will see them"
-        : "This annotation file is not committed yet, and once it is your colleagues will see these notes";
-    void vscode.window
-      .showInformationMessage(
-        `${committed} signed ${author.login}, the name git knows you by. Sign in with GitHub to use your account instead.`,
-        "Sign in with GitHub"
-      )
-      .then((chosen) => {
-        if (chosen === "Sign in with GitHub") {
-          void vscode.commands.executeCommand("codelight.signIn");
-        }
-      });
   }
 
   private collectLostEdit(entry: ThreadComment): void {

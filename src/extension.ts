@@ -4,10 +4,11 @@ import { HighlightRenderer } from "./decorations";
 import { FileCommentsView } from "./fileview";
 import { keepPrivate, stopKeepingPrivate } from "./gitignore";
 import { HighlightCommands, useSwatches } from "./highlights";
-import { IdentityProvider } from "./identity";
+import { IdentityProvider, sourceOf } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
 import { MarkerMode } from "./marker";
+import { SignInNudge } from "./nudge";
 import { SharingState } from "./sharing";
 import { FileStatus } from "./statusbar";
 import { AnnotationStore } from "./store";
@@ -22,12 +23,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const visibility = new Visibility();
   const renderer = new HighlightRenderer(store, live, visibility);
   useSwatches(new Swatches(context.globalStorageUri));
-  const highlights = new HighlightCommands(store, identity, renderer, live, visibility);
-  const marker = new MarkerMode(identity, store, renderer, highlights, live, visibility);
   const sharing = new SharingState();
+  const nudge = new SignInNudge(store, sharing);
+  const highlights = new HighlightCommands(store, identity, renderer, live, visibility, nudge);
+  const marker = new MarkerMode(identity, store, renderer, highlights, live, visibility);
   const status = new FileStatus(store, visibility, sharing);
   const comments = new CommentCommands(store, identity, highlights);
-  const threads = new ThreadView(store, live, identity, visibility, sharing);
+  const threads = new ThreadView(store, live, identity, visibility, sharing, nudge);
   const tree = new AnnotationTree(store, live);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
@@ -142,7 +144,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const local = await identity.local();
       void vscode.window.showWarningMessage(
-        `CodeLight is not signed in, so new notes carry the name git knows you by, ${local.login}.`
+        `CodeLight is not signed in, so new notes carry ${sourceOf(local)}, ${local.login}.`
       );
     }),
     vscode.commands.registerCommand("codelight.addHighlight", async () => {
@@ -247,7 +249,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const count = store.all.length;
       const who = account.verified
         ? `signed in as ${account.login}`
-        : `signing notes ${account.login}, the name git knows you by`;
+        : `signing notes ${account.login}, ${sourceOf(account)}`;
       void vscode.window.showInformationMessage(
         `CodeLight tracks ${count} annotation${count === 1 ? "" : "s"}, ${who}.`
       );

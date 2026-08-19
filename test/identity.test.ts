@@ -2,7 +2,7 @@ import * as assert from "node:assert/strict";
 import * as os from "node:os";
 import { beforeEach, describe, it } from "node:test";
 import { authentication, messages, resetFake, Uri, workspace } from "./fakevscode";
-import { IdentityProvider, localId, Remembers } from "../src/identity";
+import { IdentityProvider, localId, Remembers, sourceOf } from "../src/identity";
 
 function provider(answers: Record<string, string | undefined>): IdentityProvider {
   return new IdentityProvider(async (args) => answers[args[1]]);
@@ -140,6 +140,78 @@ describe("who a note is signed by", () => {
     });
     await Promise.all([who.require(), who.local(), who.require()]);
     assert.equal(asked.length, 2);
+  });
+
+  it("keeps the account you signed in with when a quiet check answers late", async () => {
+    const who = provider({ "user.email": "ada@b.c" });
+    authentication.session = undefined;
+    authentication.delayMs = 20;
+    const quiet = who.refresh();
+    authentication.delayMs = 0;
+    authentication.session = { account: { label: "ada", id: "42" }, accessToken: "t" };
+    assert.equal((await who.signIn())?.id, "42");
+    await quiet;
+    assert.equal(who.identity?.id, "42");
+    assert.equal(who.identity?.verified, true);
+  });
+
+  it("still gives you a name when git cannot be asked at all", async () => {
+    const who = new IdentityProvider(async () => {
+      throw new Error("git is not installed");
+    });
+    const first = await who.require();
+    assert.ok(first.id.startsWith("local:"));
+    assert.equal(first.source, "machine");
+    assert.equal((await who.require()).id, first.id);
+  });
+
+  it("keeps one id across windows when the write of a fresh one fails", async () => {
+    const broken = {
+      get<T>(): T | undefined {
+        return undefined;
+      },
+      update(): Thenable<void> {
+        return Promise.reject(new Error("no room"));
+      }
+    };
+    const one = await new IdentityProvider(async () => undefined, broken).require();
+    const other = await new IdentityProvider(async () => undefined, broken).require();
+    assert.equal(one.id, other.id);
+  });
+
+  it("does not wait forever on a write that never lands", async () => {
+    const stuck = {
+      get<T>(): T | undefined {
+        return undefined;
+      },
+      update(): Thenable<void> {
+        return new Promise<void>(() => undefined);
+      }
+    };
+    const provider = new IdentityProvider(async () => undefined, stuck);
+    const answer = await Promise.race([
+      provider.require().then((who) => (who.id.startsWith("local:") ? "answered" : "odd")),
+      new Promise((done) => setTimeout(() => done("hung"), 2500))
+    ]);
+    assert.equal(answer, "answered");
+  });
+
+  it("says nothing changed when nothing did", async () => {
+    const who = provider({ "user.email": "ada@b.c" });
+    const seen: Array<string | undefined> = [];
+    const listener = who.onDidChange((identity) => seen.push(identity?.id));
+    await who.prime();
+    await who.prime();
+    await who.refresh();
+    listener.dispose();
+    assert.deepEqual(seen, [localId("ada@b.c")]);
+  });
+
+  it("names the machine account for what it is", async () => {
+    const who = await provider({}).require();
+    assert.equal(who.source, "machine");
+    assert.equal(sourceOf(who).includes("machine"), true);
+    assert.equal(sourceOf({ ...who, source: "git" }).includes("git knows"), true);
   });
 
   it("keeps no avatar for a local name", async () => {

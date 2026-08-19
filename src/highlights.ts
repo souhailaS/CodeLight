@@ -7,6 +7,8 @@ import { LiveRanges } from "./live";
 import { Anchor, Annotation } from "./model";
 import { DEFAULT_PALETTE, PaletteColor } from "./palette";
 import { Swatches } from "./swatches";
+import { SignInNudge } from "./nudge";
+import { SharingState } from "./sharing";
 import { AnnotationStore } from "./store";
 import { Visibility } from "./visibility";
 import { snippet } from "./thread";
@@ -51,7 +53,8 @@ export class HighlightCommands {
     private readonly identity: IdentityProvider,
     private readonly renderer: HighlightRenderer,
     private readonly live: LiveRanges,
-    private readonly visibility: Visibility
+    private readonly visibility: Visibility,
+    private readonly nudge = new SignInNudge(store, new SharingState())
   ) {}
 
   async add(
@@ -169,6 +172,7 @@ export class HighlightCommands {
       void vscode.window.showWarningMessage("CodeLight could not save the highlight.");
       return [];
     }
+    void this.nudge.about(editor.document.uri, author);
     return created;
   }
 

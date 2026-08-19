@@ -7,9 +7,12 @@ import { Author } from "./model";
 const PROVIDER = "github";
 const SCOPES = ["read:user"];
 
+export type Source = "github" | "git" | "machine";
+
 export interface Identity extends Author {
   avatarUrl: string;
   verified: boolean;
+  source: Source;
 }
 
 export type Asker = (args: string[], cwd?: string) => Promise<string | undefined>;
@@ -44,8 +47,18 @@ function toIdentity(session: vscode.AuthenticationSession): Identity {
     login,
     id,
     avatarUrl: `https://avatars.githubusercontent.com/u/${encodeURIComponent(id)}`,
-    verified: true
+    verified: true,
+    source: "github"
   };
+}
+
+export function sourceOf(who: Identity): string {
+  if (who.source === "github") {
+    return "the GitHub account you signed in with";
+  }
+  return who.source === "git"
+    ? "the name git knows you by"
+    : "the account name on this machine, since git knows you by no other";
 }
 
 export function localId(seed: string): string {
@@ -61,6 +74,7 @@ export class IdentityProvider implements vscode.Disposable {
   readonly onDidChange = this.emitter.event;
 
   private pending: Promise<Identity> | undefined;
+  private generation = 0;
 
   constructor(
     private readonly ask: Asker = askGit,
@@ -81,20 +95,17 @@ export class IdentityProvider implements vscode.Disposable {
   }
 
   async refresh(): Promise<Identity | undefined> {
+    const asked = this.generation;
     let session: vscode.AuthenticationSession | undefined;
     try {
       session = await vscode.authentication.getSession(PROVIDER, SCOPES, { silent: true });
     } catch {
       return this.current;
     }
-    const next = session ? toIdentity(session) : this.mine;
-    const changed =
-      next?.id !== this.current?.id || next?.login !== this.current?.login;
-    this.current = next;
-    if (changed) {
-      this.emitter.fire(next);
+    if (asked !== this.generation) {
+      return this.current;
     }
-    return next;
+    return this.adopt(session ? toIdentity(session) : this.mine);
   }
 
   async signIn(): Promise<Identity | undefined> {
@@ -102,13 +113,20 @@ export class IdentityProvider implements vscode.Disposable {
       const session = await vscode.authentication.getSession(PROVIDER, SCOPES, {
         createIfNone: true
       });
-      const identity = toIdentity(session);
-      this.current = identity;
-      this.emitter.fire(identity);
-      return identity;
+      this.generation += 1;
+      return this.adopt(toIdentity(session));
     } catch {
       return undefined;
     }
+  }
+
+  private adopt(next: Identity | undefined): Identity | undefined {
+    const changed = next?.id !== this.current?.id || next?.login !== this.current?.login;
+    this.current = next;
+    if (changed) {
+      this.emitter.fire(next);
+    }
+    return next;
   }
 
   async require(): Promise<Identity> {
@@ -131,7 +149,7 @@ export class IdentityProvider implements vscode.Disposable {
     if (this.mine) {
       return this.mine;
     }
-    this.pending ??= this.resolveLocal();
+    this.pending ??= this.resolveLocal().catch(() => this.fallback());
     return this.pending;
   }
 
@@ -144,13 +162,31 @@ export class IdentityProvider implements vscode.Disposable {
     const address = email.trim().toLowerCase();
     const who = name.trim();
     const login = who !== "" ? who : address !== "" ? address : machine();
-    const seed = address !== "" ? address : `${await this.installation()}/${login}`;
-    const mine: Identity = { login, id: localId(seed), avatarUrl: "", verified: false };
+    const seed = address !== "" ? address : await this.installation();
+    return this.keep({
+      login,
+      id: localId(seed),
+      avatarUrl: "",
+      verified: false,
+      source: address !== "" || who !== "" ? "git" : "machine"
+    });
+  }
+
+  private fallback(): Identity {
+    return this.keep({
+      login: machine(),
+      id: localId(`${os.hostname()}/${machine()}`),
+      avatarUrl: "",
+      verified: false,
+      source: "machine"
+    });
+  }
+
+  private keep(mine: Identity): Identity {
     this.mine = mine;
     if (!this.current) {
-      this.current = mine;
+      this.adopt(mine);
     }
-    this.emitter.fire(this.current);
     return mine;
   }
 
@@ -175,12 +211,19 @@ export class IdentityProvider implements vscode.Disposable {
     if (typeof stored === "string" && stored !== "") {
       return stored;
     }
-    const fresh = randomUUID();
-    if (this.memory) {
-      await this.memory.update(INSTALLATION, fresh).then(undefined, () => undefined);
-      return fresh;
+    const here = `${os.hostname()}/${machine()}`;
+    if (!this.memory) {
+      return here;
     }
-    return `${os.hostname()}/${machine()}`;
+    const fresh = randomUUID();
+    const kept = await Promise.race([
+      this.memory.update(INSTALLATION, fresh).then(
+        () => true,
+        () => false
+      ),
+      new Promise<boolean>((done) => setTimeout(() => done(false), 1000))
+    ]);
+    return kept ? fresh : here;
   }
 
   dispose(): void {
