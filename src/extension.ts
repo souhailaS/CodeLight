@@ -29,7 +29,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = new FileStatus(store, visibility, sharing);
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity, visibility);
-  const navigation = new Navigation(store, live);
+  const navigation = new Navigation(store, live, visibility);
   const tree = new AnnotationTree(store, live);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
@@ -47,6 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
     live,
     renderer,
     marker,
+    navigation,
     status,
     visibility,
     vscode.commands.registerCommand("codelight.toggleVisibility", () => {

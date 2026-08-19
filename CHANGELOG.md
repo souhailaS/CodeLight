@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-* **Go to Next Highlight** and **Go to Previous Highlight** step through the highlights of the open file in the order they sit in it, wrapping round at either end. The status bar says which one you landed on and how many comments it carries. A highlight this version of the file cannot place is skipped rather than jumped to blindly, and when none of them can be placed CodeLight says so instead of moving the cursor. The two commands sit as arrows above the **This File** panel and in the palette, and take no keyboard shortcut of their own.
+* **Go to Next Highlight** and **Go to Previous Highlight** step through the highlights of the open file in the order they sit in it, wrapping round at either end. The status bar says which one you landed on, how many comments it carries, how many highlights had to be left out, and whether the notes are hidden. A highlight this version of the file cannot place is skipped rather than jumped to blindly, and when none of them can be placed CodeLight says so instead of moving the cursor. The cursor lands at the start of the highlight rather than selecting it, so the next thing you type cannot swallow the code it marks. The two commands sit as arrows above the **This File** panel and in the palette, and take no keyboard shortcut of their own.
 
 ## 0.7.0
 
