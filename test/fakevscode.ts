@@ -382,6 +382,8 @@ export class TextDocument {
 
 export const foldersChanged = new EventEmitter<void>();
 
+export const filesRenamed = new EventEmitter<{ files: ReadonlyArray<{ oldUri: Uri; newUri: Uri }> }>();
+
 export const documentOpened = new EventEmitter<TextDocument>();
 export const documentChanged = new EventEmitter<{
   document: TextDocument;
@@ -847,6 +849,7 @@ export const workspace = {
     };
   },
   onDidChangeWorkspaceFolders: foldersChanged.event,
+  onDidRenameFiles: filesRenamed.event,
   openTextDocument(target: Uri) {
     const found = workspace.textDocuments.find((entry) => entry.uri.toString() === target.toString());
     return Promise.resolve(found ?? { uri: target });
@@ -861,6 +864,7 @@ export function resetFake(): void {
   workspace.workspaceFolders = [];
   workspace.textDocuments = [];
   foldersChanged.dispose();
+  filesRenamed.dispose();
   documentOpened.dispose();
   documentChanged.dispose();
   documentSaved.dispose();

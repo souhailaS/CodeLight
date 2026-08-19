@@ -7,6 +7,7 @@ import { HighlightCommands, useSwatches } from "./highlights";
 import { IdentityProvider, sourceOf } from "./identity";
 import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
+import { RenameWatcher } from "./renames";
 import { MarkerMode } from "./marker";
 import { SignInNudge } from "./nudge";
 import { SharingState } from "./sharing";
@@ -38,6 +39,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const fileComments = new FileCommentsView(store, live, sharing);
   const ready = store.initialize().catch(() => undefined);
+  const renames = new RenameWatcher(store, ready);
   void ready.then(() => fileComments.ready());
   void identity.prime();
 
@@ -45,6 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
     identity,
     store,
     live,
+    renames,
     renderer,
     marker,
     status,
