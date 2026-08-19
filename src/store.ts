@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { FolderStore } from "./folderstore";
 import { Annotation } from "./model";
-import { toRelativePath, toUri } from "./paths";
+import { pathLabel, toRelativePath, toUri } from "./paths";
 
 export { FolderStore } from "./folderstore";
 
@@ -89,6 +89,11 @@ export class AnnotationStore implements vscode.Disposable {
     return detail === "" ? name : `${name} · ${detail}`;
   }
 
+  private trail(store: FolderStore, depth: number): string {
+    const parts = store.rootUri.path.split("/").filter((part) => part !== "");
+    return parts.slice(Math.max(0, parts.length - depth)).join("/");
+  }
+
   private nameOf(store: FolderStore): string {
     const parts = store.rootUri.path.split("/").filter((part) => part !== "");
     const own = parts[parts.length - 1] ?? store.rootUri.toString();
@@ -102,8 +107,16 @@ export class AnnotationStore implements vscode.Disposable {
     if (!shared) {
       return name;
     }
-    const parent = parts[parts.length - 2];
-    return parent === undefined ? name : `${parent}/${name}`;
+    for (let depth = 2; depth <= parts.length; depth += 1) {
+      const longer = parts.slice(parts.length - depth).join("/");
+      const still = this.folders.some(
+        (other) => other.key !== store.key && this.trail(other, depth) === longer
+      );
+      if (!still) {
+        return longer;
+      }
+    }
+    return pathLabel(store.rootUri);
   }
 
   rootFor(target: vscode.Uri): vscode.Uri | undefined {
@@ -261,8 +274,8 @@ export class AnnotationStore implements vscode.Disposable {
     const current = active ? this.folderFor(active.document.uri) : undefined;
     const picked = await vscode.window.showQuickPick(
       folders.map((store) => ({
-        label: vscode.workspace.getWorkspaceFolder(store.rootUri)?.name ?? store.rootUri.fsPath,
-        description: store.rootUri.fsPath,
+        label: vscode.workspace.getWorkspaceFolder(store.rootUri)?.name ?? pathLabel(store.rootUri),
+        description: pathLabel(store.rootUri),
         picked: store === current,
         store
       })),

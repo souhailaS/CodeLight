@@ -288,20 +288,13 @@ export class PanelCommands {
       void vscode.window.showInformationMessage("CodeLight has no notes to search yet.");
       return;
     }
-    const detached = this.detachedByFile();
+    const detached = this.detachedByFile(notes);
     const items = notes
       .map((annotation) => ({
         label: plain(snippet(annotation)),
         where: this.store.label(annotation.root, annotation.file),
         description: plain(this.describe(annotation, detached)),
-        detail: plain(
-          trim(
-            annotation.comments
-              .map((comment) => `@${comment.author.login} ${trim(comment.body, 120)}`)
-              .join(" · "),
-            240
-          )
-        ),
+        detail: this.commentsOf(annotation),
         annotation
       }))
       .sort((a, b) =>
@@ -325,6 +318,13 @@ export class PanelCommands {
     }
   }
 
+  private commentsOf(annotation: Annotation): string {
+    const joined = annotation.comments
+      .map((comment) => `@${comment.author.login} ${trim(comment.body, 120)}`)
+      .join(" · ");
+    return joined === "" ? "" : plain(trim(joined, 240));
+  }
+
   private describe(annotation: Annotation, detached: Map<string, ReadonlySet<string>>): string {
     const where = this.store.label(annotation.root, annotation.file);
     const parts = [`${where}:${annotation.range.startLine + 1}`, `@${annotation.author.login}`];
@@ -336,10 +336,17 @@ export class PanelCommands {
     return parts.join(" · ");
   }
 
-  private detachedByFile(): Map<string, ReadonlySet<string>> {
+  private detachedByFile(notes: readonly Annotation[]): Map<string, ReadonlySet<string>> {
+    const wanted = new Set<string>();
+    for (const annotation of notes) {
+      const uri = this.store.uriFor(annotation);
+      if (uri) {
+        wanted.add(uri.toString());
+      }
+    }
     const found = new Map<string, ReadonlySet<string>>();
     for (const document of vscode.workspace.textDocuments) {
-      if (this.store.relative(document.uri) === undefined) {
+      if (!wanted.has(document.uri.toString())) {
         continue;
       }
       found.set(document.uri.toString(), this.live.detachedIn(document));

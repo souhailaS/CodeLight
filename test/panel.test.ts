@@ -327,6 +327,40 @@ describe("searching the notes", () => {
     );
   });
 
+  it("leaves the detail empty for a note nobody has replied to", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ detail: string }>;
+    assert.equal(items[0].detail, "");
+  });
+
+  it("tells two folders apart when their parents share a name too", async () => {
+    const one = nodePath.join(root, "alpha", "pkg", "api");
+    const two = nodePath.join(root, "beta", "pkg", "api");
+    for (const where of [one, two]) {
+      fs.mkdirSync(nodePath.join(where, ".vscode"), { recursive: true });
+    }
+    workspace.workspaceFolders = [
+      { uri: Uri.file(one), name: "api", index: 0 },
+      { uri: Uri.file(two), name: "api", index: 1 }
+    ];
+    const { store, commands } = await panel();
+    const first = annotation("one", "src/index.ts");
+    first.root = Uri.file(one).toString();
+    first.range = { startLine: 4, startCharacter: 0, endLine: 4, endCharacter: 5 };
+    const other = annotation("two", "src/index.ts");
+    other.root = Uri.file(two).toString();
+    other.range = { ...first.range };
+    assert.ok(await store.add(first));
+    assert.ok(await store.add(other));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.equal(new Set(items.map((item) => item.description)).size, 2, JSON.stringify(items));
+  });
+
   it("tells two workspace folders of the same name apart", async () => {
     const one = nodePath.join(root, "one", "api");
     const two = nodePath.join(root, "two", "api");
