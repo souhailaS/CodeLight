@@ -340,8 +340,10 @@ describe("searching the notes", () => {
     const { store, commands } = await panel();
     const first = annotation("one", "src/index.ts");
     first.root = Uri.file(one).toString();
+    first.range = { startLine: 4, startCharacter: 0, endLine: 4, endCharacter: 5 };
     const other = annotation("two", "src/index.ts");
     other.root = Uri.file(two).toString();
+    other.range = { ...first.range };
     assert.ok(await store.add(first));
     assert.ok(await store.add(other));
     queuePick(undefined);
