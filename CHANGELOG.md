@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+* **A note no longer needs a GitHub account.** CodeLight used to refuse to write anything until you signed in. It now signs a note with the name git knows you by when there is no account signed in, which is the name your commits already carry, so a first run needs nothing set up. The name is not verified by anything, and CodeLight says so rather than dressing it up, once a window, the first time you write a note into an annotation file git carries or is about to. When git knows neither a name nor an email the note carries the account name on this machine, and every message says that is what it is. Sign in later and the notes you wrote before are still yours to edit and delete.
+
 ## 0.7.0
 
 Two things that made CodeLight untrustworthy in exactly the situation it was built for, a team sharing notes through git.
