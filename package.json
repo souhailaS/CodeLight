@@ -256,6 +256,12 @@
         "command": "codelight.resolveConflict",
         "title": "Merge the Notes After a Conflict",
         "category": "CodeLight"
+      },
+      {
+        "command": "codelight.search",
+        "title": "Search the Notes",
+        "category": "CodeLight",
+        "icon": "$(search)"
       }
     ],
     "keybindings": [
@@ -404,6 +410,11 @@
           "command": "codelight.deleteOrphansEverywhere",
           "when": "view == codelight.annotations",
           "group": "1_cleanup"
+        },
+        {
+          "command": "codelight.search",
+          "when": "view == codelight.annotations",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [
@@ -736,5 +747,15 @@
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.20.2",
     "typescript": "^5.4.5"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "CodeLight writes the annotation file inside .vscode and runs git to see whether your notes are ignored or committed, so it waits until you trust the folder."
+    },
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "Notes are read and written through the file system VS Code provides, so they work here. The check that tells you whether git ignores or carries the annotation file runs the git command line, which a virtual workspace has no place to run, so CodeLight says nothing about sharing."
+    }
   }
 }

@@ -48,6 +48,10 @@ function colorIcon(color: string, palette: readonly PaletteColor[]): vscode.Them
     : new vscode.ThemeIcon("circle-filled");
 }
 
+function plain(value: string): string {
+  return value.replace(/\$\(/g, "(");
+}
+
 function trim(value: string, limit: number): string {
   const text = value.replace(/\s+/g, " ").trim();
   if (text === "") {
@@ -258,6 +262,12 @@ export class PanelCommands {
     }
     try {
       const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+      if (annotation.orphaned === true) {
+        void vscode.window.showWarningMessage(
+          "The text that highlight marked is gone from the file, so it opened the file without jumping."
+        );
+        return;
+      }
       if (this.live.detachedIn(document).has(annotationId)) {
         void vscode.window.showWarningMessage(
           "CodeLight cannot find the text that highlight marks in this version of the file, so it opened the file without jumping."
@@ -270,6 +280,86 @@ export class PanelCommands {
     } catch {
       void vscode.window.showWarningMessage(`CodeLight could not open ${annotation.file}.`);
     }
+  }
+
+  async search(): Promise<void> {
+    const notes = this.store.all;
+    if (notes.length === 0) {
+      void vscode.window.showInformationMessage("CodeLight has no notes to search yet.");
+      return;
+    }
+    const detached = this.detachedByFile(notes);
+    const items = notes
+      .map((annotation) => ({
+        label: plain(snippet(annotation)),
+        where: this.store.label(annotation.root, annotation.file),
+        description: plain(this.describe(annotation, detached)),
+        detail: this.commentsOf(annotation),
+        annotation
+      }))
+      .sort((a, b) =>
+        a.where === b.where
+          ? a.annotation.range.startLine - b.annotation.range.startLine
+          : a.where < b.where
+            ? -1
+            : 1
+      );
+    const filtered = this.tree.activeFilter !== undefined;
+    const picked = await vscode.window.showQuickPick(items, {
+      title: "CodeLight",
+      placeHolder: filtered
+        ? "Search every note, including the colours the panel is filtering out"
+        : "Search the text you marked and the notes you wrote",
+      matchOnDescription: true,
+      matchOnDetail: true
+    });
+    if (picked) {
+      await this.reveal(picked.annotation.id);
+    }
+  }
+
+  private commentsOf(annotation: Annotation): string {
+    const joined = annotation.comments
+      .map((comment) => `@${comment.author.login} ${trim(comment.body, 120)}`)
+      .join(" · ");
+    return joined === "" ? "" : plain(trim(joined, 240));
+  }
+
+  private describe(annotation: Annotation, detached: Map<string, ReadonlySet<string>>): string {
+    const where = this.store.label(annotation.root, annotation.file);
+    const parts = [`${where}:${annotation.range.startLine + 1}`, `@${annotation.author.login}`];
+    if (annotation.orphaned === true) {
+      parts.push("text deleted");
+    } else if (this.unplaceable(annotation, detached)) {
+      parts.push("not in this version");
+    }
+    return parts.join(" · ");
+  }
+
+  private detachedByFile(notes: readonly Annotation[]): Map<string, ReadonlySet<string>> {
+    const wanted = new Set<string>();
+    for (const annotation of notes) {
+      const uri = this.store.uriFor(annotation);
+      if (uri) {
+        wanted.add(uri.toString());
+      }
+    }
+    const found = new Map<string, ReadonlySet<string>>();
+    for (const document of vscode.workspace.textDocuments) {
+      if (!wanted.has(document.uri.toString())) {
+        continue;
+      }
+      found.set(document.uri.toString(), this.live.detachedIn(document));
+    }
+    return found;
+  }
+
+  private unplaceable(
+    annotation: Annotation,
+    detached: Map<string, ReadonlySet<string>>
+  ): boolean {
+    const uri = this.store.uriFor(annotation);
+    return uri !== undefined && (detached.get(uri.toString())?.has(annotation.id) ?? false);
   }
 
   async deleteAnnotation(node?: Node | string): Promise<void> {

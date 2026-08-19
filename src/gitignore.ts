@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { writeThroughTemporary } from "./atomic";
-import { exists, isMissingFile } from "./paths";
+import { exists, isMissingFile, pathLabel } from "./paths";
 
 const HEADER = "# CodeLight notes, kept out of git";
 const ENTRIES = [".vscode/codelight.json", ".vscode/codelight.json.gz"];
@@ -39,7 +39,7 @@ async function readIgnore(root: vscode.Uri): Promise<Ignore | undefined> {
   );
   if (open) {
     void vscode.window.showWarningMessage(
-      `Save ${uri.fsPath} first, CodeLight will not write over unsaved changes.`
+      `Save ${pathLabel(uri)} first, CodeLight will not write over unsaved changes.`
     );
     return undefined;
   }
@@ -48,7 +48,7 @@ async function readIgnore(root: vscode.Uri): Promise<Ignore | undefined> {
     text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
   } catch (error) {
     if (!isMissingFile(error)) {
-      void vscode.window.showWarningMessage(`CodeLight could not read ${uri.fsPath}. ${describe(error)}`);
+      void vscode.window.showWarningMessage(`CodeLight could not read ${pathLabel(uri)}. ${describe(error)}`);
       return undefined;
     }
   }
@@ -71,13 +71,13 @@ async function writeIgnore(ignore: Ignore, lines: string[]): Promise<boolean> {
       }
       reportedInPlace.add(ignore.uri.fsPath);
       void vscode.window.showWarningMessage(
-        `CodeLight saved ${ignore.uri.fsPath} in place because it cannot create a temporary file. An interrupted save could truncate it.`
+        `CodeLight saved ${pathLabel(ignore.uri)} in place because it cannot create a temporary file. An interrupted save could truncate it.`
       );
     });
     return true;
   } catch (error) {
     void vscode.window.showWarningMessage(
-      `CodeLight could not write ${ignore.uri.fsPath}, so it was left as it was. ${describe(error)}`
+      `CodeLight could not write ${pathLabel(ignore.uri)}, so it was left as it was. ${describe(error)}`
     );
     return false;
   }
@@ -101,7 +101,7 @@ export async function keepPrivate(root: vscode.Uri): Promise<void> {
   const missing = ENTRIES.filter((entry) => !present.has(entry));
   if (missing.length === 0 && !negated) {
     void vscode.window.showInformationMessage(
-      `${ignore.uri.fsPath} already names both CodeLight files. A file git already tracks stays tracked until you run git rm --cached on it.`
+      `${pathLabel(ignore.uri)} already names both CodeLight files. A file git already tracks stays tracked until you run git rm --cached on it.`
     );
     return;
   }
@@ -120,11 +120,11 @@ export async function keepPrivate(root: vscode.Uri): Promise<void> {
   if (!(await writeIgnore(ignore, lines))) {
     return;
   }
-  const repository = await exists(vscode.Uri.joinPath(root, ".git"));
+  const repository = root.scheme !== "file" || (await exists(vscode.Uri.joinPath(root, ".git")));
   const note = repository
     ? "A file that git already tracks stays tracked until you run git rm --cached on it, and committing that removal takes the file out of everyone else's checkout too."
-    : `CodeLight found no .git in ${root.fsPath}. If this folder is not inside a git repository the rule does nothing until it is.`;
-  await reveal(ignore.uri, `${ignore.uri.fsPath} now names the CodeLight notes. ${note}`);
+    : `CodeLight found no .git in ${pathLabel(root)}. If this folder is not inside a git repository the rule does nothing until it is.`;
+  await reveal(ignore.uri, `${pathLabel(ignore.uri)} now names the CodeLight notes. ${note}`);
 }
 
 export async function stopKeepingPrivate(root: vscode.Uri): Promise<void> {
@@ -134,7 +134,7 @@ export async function stopKeepingPrivate(root: vscode.Uri): Promise<void> {
   }
   if (!ignore.lines.some(isEntry)) {
     void vscode.window.showInformationMessage(
-      `Nothing names the CodeLight notes in ${ignore.uri.fsPath}. Another rule such as .vscode/* can still keep them out, so check git check-ignore if they do not show up.`
+      `Nothing names the CodeLight notes in ${pathLabel(ignore.uri)}. Another rule such as .vscode/* can still keep them out, so check git check-ignore if they do not show up.`
     );
     return;
   }

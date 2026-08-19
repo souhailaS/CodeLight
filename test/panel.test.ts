@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   details,
   messages,
+  opened,
+  picks,
+  queuePick,
   queueAnswer,
   resetFake,
   ThemeIcon,
@@ -23,10 +26,10 @@ import { AnnotationStore } from "../src/store";
 let root = "";
 let closing: Array<{ dispose(): void }> = [];
 
-function comment(id: string, body: string): Comment {
+function comment(id: string, body: string, login = "ada"): Comment {
   return {
     id,
-    author: { login: "ada", id: "42" },
+    author: { login, id: "42" },
     body,
     createdAt: "2026-08-17T09:12:33.000Z",
     updatedAt: "2026-08-17T09:12:33.000Z"
@@ -55,6 +58,7 @@ async function panel(): Promise<{
   store: AnnotationStore;
   tree: AnnotationTree;
   commands: PanelCommands;
+  live: LiveRanges;
 }> {
   const store = new AnnotationStore();
   await store.initialize();
@@ -62,7 +66,7 @@ async function panel(): Promise<{
   const tree = new AnnotationTree(store, live);
   const commands = new PanelCommands(store, live, tree);
   closing.push(tree, live, store);
-  return { store, tree, commands };
+  return { store, tree, commands, live };
 }
 
 function files(tree: AnnotationTree): FileNode[] {
@@ -203,6 +207,249 @@ describe("the annotation tree", () => {
     assert.ok(await store.add(annotation("one", "src/a.ts")));
     listener.dispose();
     assert.ok(drawn > 0);
+  });
+});
+
+describe("searching the notes", () => {
+  it("offers the marked text, the file and the author", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.anchor = { text: "const total", before: "", after: "" };
+    entry.comments = [comment("c1", "worth a look")];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    assert.equal(picks.length, 1);
+    const items = picks[0].items as Array<{ label: string; description: string; detail: string }>;
+    assert.equal(items.length, 1);
+    assert.equal(items[0].label, "const total");
+    assert.ok(items[0].description.includes("a.ts"));
+    assert.ok(items[0].description.includes("@ada"));
+    assert.ok(items[0].detail.includes("worth a look"));
+    assert.equal((picks[0].options as { matchOnDetail: boolean }).matchOnDetail, true);
+  });
+
+  it("finds a note by the colleague who replied to it", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.comments = [comment("c1", "this is broken", "bob")];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ detail: string }>;
+    assert.ok(items[0].detail.includes("@bob"), items[0].detail);
+  });
+
+  it("tells two files of the same name apart", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "web/src/index.ts")));
+    assert.ok(await store.add(annotation("two", "api/src/index.ts")));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.equal(new Set(items.map((item) => item.description)).size, 2);
+    assert.ok(items.some((item) => item.description.includes("web/src/index.ts")));
+  });
+
+  it("keeps codicon markup out of the row", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.anchor = { text: "$(pwd)", before: "", after: "" };
+    entry.comments = [comment("c1", "$(trash) careful")];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ label: string; detail: string }>;
+    assert.equal(items[0].label.includes("$("), false);
+    assert.equal(items[0].detail.includes("$("), false);
+    assert.ok(items[0].label.includes("pwd"));
+  });
+
+  it("says when the text a note marked is gone", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.orphaned = true;
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.ok(items[0].description.includes("text deleted"), items[0].description);
+  });
+
+  it("keeps a very long comment out of the row", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.comments = [comment("c1", "y".repeat(600)), comment("c2", "z".repeat(600))];
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ detail: string }>;
+    assert.ok(items[0].detail.length < 400, String(items[0].detail.length));
+    assert.ok(items[0].detail.includes("…"));
+  });
+
+  it("says it is looking past the colour the panel is filtered to", async () => {
+    const { store, tree, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts", "red")));
+    tree.setFilter("green");
+    queuePick(undefined);
+    await commands.search();
+    const options = picks[0].options as { placeHolder: string };
+    assert.ok(options.placeHolder.includes("filtering out"), options.placeHolder);
+  });
+
+  it("tells two notes on the same text apart by line", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/a.ts")));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.equal(new Set(items.map((item) => item.description)).size, 2);
+  });
+
+  it("lists the notes of a file in the order they sit in it", async () => {
+    const { store, commands } = await panel();
+    const late = annotation("late", "src/a.ts");
+    late.range = { startLine: 11, startCharacter: 0, endLine: 11, endCharacter: 5 };
+    late.anchor = { text: "zulu", before: "", after: "" };
+    const early = annotation("early", "src/a.ts");
+    early.range = { startLine: 8, startCharacter: 0, endLine: 8, endCharacter: 5 };
+    early.anchor = { text: "alpha", before: "", after: "" };
+    assert.ok(await store.add(late));
+    assert.ok(await store.add(early));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ label: string }>;
+    assert.deepEqual(
+      items.map((item) => item.label),
+      ["alpha", "zulu"]
+    );
+  });
+
+  it("leaves the detail empty for a note nobody has replied to", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ detail: string }>;
+    assert.equal(items[0].detail, "");
+  });
+
+  it("tells two folders apart when their parents share a name too", async () => {
+    const one = nodePath.join(root, "alpha", "pkg", "api");
+    const two = nodePath.join(root, "beta", "pkg", "api");
+    for (const where of [one, two]) {
+      fs.mkdirSync(nodePath.join(where, ".vscode"), { recursive: true });
+    }
+    workspace.workspaceFolders = [
+      { uri: Uri.file(one), name: "api", index: 0 },
+      { uri: Uri.file(two), name: "api", index: 1 }
+    ];
+    const { store, commands } = await panel();
+    const first = annotation("one", "src/index.ts");
+    first.root = Uri.file(one).toString();
+    first.range = { startLine: 4, startCharacter: 0, endLine: 4, endCharacter: 5 };
+    const other = annotation("two", "src/index.ts");
+    other.root = Uri.file(two).toString();
+    other.range = { ...first.range };
+    assert.ok(await store.add(first));
+    assert.ok(await store.add(other));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.equal(new Set(items.map((item) => item.description)).size, 2, JSON.stringify(items));
+  });
+
+  it("tells two workspace folders of the same name apart", async () => {
+    const one = nodePath.join(root, "one", "api");
+    const two = nodePath.join(root, "two", "api");
+    for (const where of [one, two]) {
+      fs.mkdirSync(nodePath.join(where, ".vscode"), { recursive: true });
+    }
+    workspace.workspaceFolders = [
+      { uri: Uri.file(one), name: "api", index: 0 },
+      { uri: Uri.file(two), name: "api", index: 1 }
+    ];
+    const { store, commands } = await panel();
+    const first = annotation("one", "src/index.ts");
+    first.root = Uri.file(one).toString();
+    first.range = { startLine: 4, startCharacter: 0, endLine: 4, endCharacter: 5 };
+    const other = annotation("two", "src/index.ts");
+    other.root = Uri.file(two).toString();
+    other.range = { ...first.range };
+    assert.ok(await store.add(first));
+    assert.ok(await store.add(other));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ description: string }>;
+    assert.equal(new Set(items.map((item) => item.description)).size, 2, JSON.stringify(items));
+  });
+
+  it("reads each open file once however many notes it holds", async () => {
+    const { store, commands, live } = await panel();
+    const document = new TextDocument(Uri.file(nodePath.join(root, "src/a.ts")), "const one = 1;\n");
+    workspace.textDocuments = [document];
+    for (let count = 0; count < 5; count += 1) {
+      assert.ok(await store.add(annotation(`n${count}`, "src/a.ts")));
+    }
+    let reads = 0;
+    const detached = live.detachedIn.bind(live);
+    (live as unknown as { detachedIn: typeof detached }).detachedIn = (target: TextDocument) => {
+      reads += 1;
+      return detached(target);
+    };
+    queuePick(undefined);
+    await commands.search();
+    assert.equal(reads, 1);
+  });
+
+  it("caps the detail however many comments a note carries", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.comments = Array.from({ length: 40 }, (_value, at) => comment(`c${at}`, "y".repeat(100)));
+    assert.ok(await store.add(entry));
+    queuePick(undefined);
+    await commands.search();
+    const items = picks[0].items as Array<{ detail: string }>;
+    assert.ok(items[0].detail.length < 300, String(items[0].detail.length));
+  });
+
+  it("jumps to the note the reader picked", async () => {
+    const { store, commands } = await panel();
+    assert.ok(await store.add(annotation("one", "src/a.ts")));
+    assert.ok(await store.add(annotation("two", "src/b.ts")));
+    queuePick(1);
+    messages.length = 0;
+    await commands.search();
+    assert.deepEqual(
+      opened.map((document) => nodePath.basename(document.uri.fsPath)),
+      ["b.ts"]
+    );
+  });
+
+  it("says so when there is nothing to search", async () => {
+    const { commands } = await panel();
+    messages.length = 0;
+    await commands.search();
+    assert.ok(messages.some((line) => line.includes("no notes to search")));
+    assert.deepEqual(picks, []);
+  });
+});
+
+describe("opening a note whose text is gone", () => {
+  it("opens the file and says why it did not jump", async () => {
+    const { store, commands } = await panel();
+    const entry = annotation("one", "src/a.ts");
+    entry.orphaned = true;
+    assert.ok(await store.add(entry));
+    messages.length = 0;
+    await commands.reveal("one");
+    assert.equal(opened.length, 1);
+    assert.ok(
+      warnings().some((line) => line.includes("is gone from the file")),
+      warnings().join("|")
+    );
   });
 });
 

@@ -116,6 +116,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("codelight.threadDelete", async (comment: ThreadComment) => {
       await threads.deleteComment(comment);
     }),
+    vscode.commands.registerCommand("codelight.search", async () => {
+      await ready;
+      await panel.search();
+    }),
     vscode.commands.registerCommand("codelight.nextHighlight", async () => {
       await ready;
       await navigation.step(true);

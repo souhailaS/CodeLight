@@ -54,6 +54,10 @@ export function toRelativePath(root: vscode.Uri, target: vscode.Uri): string | u
   return isSafeRelativePath(relative) ? relative : undefined;
 }
 
+export function pathLabel(target: vscode.Uri): string {
+  return target.scheme === "file" ? target.fsPath : target.toString();
+}
+
 export function toUri(root: vscode.Uri, relativePath: string): vscode.Uri | undefined {
   if (!isSafeRelativePath(relativePath)) {
     return undefined;
