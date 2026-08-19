@@ -23,6 +23,7 @@ export class AnnotationStore implements vscode.Disposable {
 
   async initialize(): Promise<void> {
     await this.sync();
+    this.tellAboutConflicts();
   }
 
   get isReady(): boolean {
@@ -180,17 +181,25 @@ export class AnnotationStore implements vscode.Disposable {
   async resolveConflict(): Promise<boolean> {
     const stuck = this.folders.filter((store) => store.conflicted);
     const asked = stuck.length > 0 ? stuck : this.folders;
-    let merged = false;
+    const outcomes = [];
     for (const store of asked) {
-      const outcome = await store.resolveConflict();
-      if (outcome === "merged") {
-        merged = true;
-      }
+      outcomes.push(await store.resolveConflict());
     }
-    if (!merged && asked.length > 0) {
-      void vscode.window.showInformationMessage("CodeLight found no merge conflict to put back together.");
+    this.tellAboutConflicts();
+    if (outcomes.every((outcome) => outcome === "clean") && outcomes.length > 0) {
+      void vscode.window.showInformationMessage(
+        "CodeLight found no merge conflict to put back together."
+      );
     }
-    return merged;
+    return outcomes.includes("merged");
+  }
+
+  tellAboutConflicts(): void {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codelight.conflicted",
+      this.folders.some((store) => store.conflicted)
+    );
   }
 
   async refresh(): Promise<void> {
@@ -273,7 +282,10 @@ export class AnnotationStore implements vscode.Disposable {
       this.stores.set(key, store);
       this.links.set(
         key,
-        store.onDidChange(() => this.emitter.fire())
+        store.onDidChange(() => {
+          this.tellAboutConflicts();
+          this.emitter.fire();
+        })
       );
       opening.push(store.initialize());
       changed = true;

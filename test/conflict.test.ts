@@ -44,25 +44,33 @@ function usable(): boolean {
 
 const NEEDS_GIT = { skip: usable() ? false : "these tests need git on the path" };
 
-function git(args: string[], cwd: string): void {
-  execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "merge.conflictStyle=merge", ...args], {
+function git(args: string[], cwd: string, style = "merge"): void {
+  execFileSync("git", ["-c", "commit.gpgsign=false", `-c`, `merge.conflictStyle=${style}`, ...args], {
     cwd,
     stdio: "ignore",
     env: { ...process.env, ...SOLO }
   });
 }
 
-function conflicted(mine: Annotation[], theirs: Annotation[]): string {
+const BASE = annotation("base", "src/base.ts");
+
+function conflicted(mine: Annotation[], theirs: Annotation[], style = "merge"): string {
   const repo = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-merge-"));
   const file = nodePath.join(repo, "codelight.json");
   try {
-    return build(repo, file, mine, theirs);
+    return build(repo, file, mine, theirs, style);
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
 }
 
-function build(repo: string, file: string, mine: Annotation[], theirs: Annotation[]): string {
+function build(
+  repo: string,
+  file: string,
+  mine: Annotation[],
+  theirs: Annotation[],
+  style: string
+): string {
   git(["init", "-q", "-b", "main"], repo);
   git(["config", "user.email", "a@b.c"], repo);
   git(["config", "user.name", "ada"], repo);
@@ -70,13 +78,13 @@ function build(repo: string, file: string, mine: Annotation[], theirs: Annotatio
   git(["add", "."], repo);
   git(["commit", "-qm", "base"], repo);
   git(["checkout", "-qb", "theirs"], repo);
-  fs.writeFileSync(file, serializeStore([annotation("base", "src/base.ts"), ...theirs]));
+  fs.writeFileSync(file, serializeStore(theirs));
   git(["commit", "-qam", "theirs"], repo);
   git(["checkout", "-q", "main"], repo);
-  fs.writeFileSync(file, serializeStore([annotation("base", "src/base.ts"), ...mine]));
+  fs.writeFileSync(file, serializeStore(mine));
   git(["commit", "-qam", "mine"], repo);
   try {
-    git(["merge", "theirs"], repo);
+    git(["merge", "theirs"], repo, style);
   } catch {
     // the conflict is the point
   }
@@ -100,13 +108,13 @@ afterEach(() => {
 
 describe("a real git conflict in the annotation file", NEEDS_GIT, () => {
   it("is what two people on two branches actually get", () => {
-    const raw = conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]);
+    const raw = conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")]);
     assert.ok(hasConflict(raw), raw);
     assert.throws(() => parseStore(raw), /merge conflict/);
   });
 
   it("keeps both sides when CodeLight merges it", () => {
-    const raw = conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]);
+    const raw = conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")]);
     const merged = mergeSides(raw);
     assert.ok(merged);
     assert.deepEqual(
@@ -117,13 +125,50 @@ describe("a real git conflict in the annotation file", NEEDS_GIT, () => {
 
   it("keeps the newer of two edits to the same note", () => {
     const raw = conflicted(
-      [annotation("same", "src/a.ts", "2026-08-02T00:00:00.000Z")],
-      [annotation("same", "src/b.ts", "2026-08-03T00:00:00.000Z")]
+      [BASE, annotation("same", "src/a.ts", "2026-08-02T00:00:00.000Z")],
+      [BASE, annotation("same", "src/b.ts", "2026-08-03T00:00:00.000Z")]
     );
     const merged = mergeSides(raw);
     assert.ok(merged);
     const same = merged.annotations.find((entry) => entry.id === "same");
     assert.equal(same?.file, "src/b.ts");
+  });
+});
+
+describe("what git's own default conflict style gives us", () => {
+  it("merges both sides whichever style git used", NEEDS_GIT, () => {
+    for (const style of ["merge", "diff3", "zdiff3"]) {
+      const raw = conflicted(
+        [BASE, annotation("mine", "src/a.ts")],
+        [BASE, annotation("theirs", "src/b.ts")],
+        style
+      );
+      const merged = mergeSides(raw);
+      assert.ok(merged, style);
+      assert.deepEqual(
+        merged.annotations.map((entry) => entry.id).sort(),
+        ["base", "mine", "theirs"],
+        style
+      );
+      assert.equal(merged.sawBase, style !== "merge", style);
+    }
+  });
+
+  it("says it cannot know about deletions when git gave it no base", NEEDS_GIT, () => {
+    const raw = conflicted([BASE, annotation("mine", "src/a.ts")], [], "merge");
+    const merged = mergeSides(raw);
+    assert.ok(merged);
+    assert.equal(merged.sawBase, false);
+    assert.ok(merged.annotations.some((entry) => entry.id === "base"));
+  });
+
+  it("honours a deletion when git gave it the base", NEEDS_GIT, () => {
+    const raw = conflicted([BASE, annotation("mine", "src/a.ts")], [], "diff3");
+    const merged = mergeSides(raw);
+    assert.ok(merged);
+    assert.equal(merged.sawBase, true);
+    assert.equal(merged.annotations.some((entry) => entry.id === "base"), false);
+    assert.ok(merged.dropped > 0);
   });
 });
 
@@ -153,6 +198,31 @@ describe("reading the two sides apart", () => {
     assert.equal(sidesOf("no markers here"), undefined);
   });
 
+  it("merges anyway when only the base section is unreadable", () => {
+    const mine = JSON.stringify({ version: 1, annotations: [] }, null, 2);
+    const raw = [
+      "<<<<<<< HEAD",
+      mine,
+      "||||||| base",
+      "{ not json at all",
+      "=======",
+      JSON.stringify({ version: 1, annotations: [] }, null, 2),
+      ">>>>>>> other"
+    ].join("\n");
+    const merged = mergeSides(raw);
+    assert.ok(merged);
+    assert.equal(merged.sawBase, false);
+  });
+
+  it("writes an entry it could not read only once", () => {
+    const weird = { id: "weird", nope: true };
+    const side = JSON.stringify({ version: 1, annotations: [weird] }, null, 2);
+    const raw = ["<<<<<<< HEAD", side, "=======", side, ">>>>>>> other"].join("\n");
+    const merged = mergeSides(raw);
+    assert.ok(merged);
+    assert.equal(merged.rejected.length, 1);
+  });
+
   it("refuses to merge when a side is not valid JSON on its own", () => {
     const raw = ["<<<<<<< HEAD", "{not json", "=======", "{}", ">>>>>>> other"].join("\n");
     assert.equal(mergeSides(raw), undefined);
@@ -169,14 +239,14 @@ describe("what the store does about it", () => {
   }
 
   it("says a conflict is a conflict rather than bad json", NEEDS_GIT, async () => {
-    const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
+    const store = await open(conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")]));
     assert.ok(warnings().some((line) => line.includes("unresolved merge conflict")), messages.join("\n"));
     assert.equal(warnings().some((line) => line.includes("not valid JSON")), false);
     assert.deepEqual(store.all, []);
   });
 
   it("merges the file when asked and reads the notes back", NEEDS_GIT, async () => {
-    const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
+    const store = await open(conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")]));
     messages.length = 0;
     assert.equal(await store.resolveConflict(), true);
     assert.deepEqual(
@@ -189,7 +259,7 @@ describe("what the store does about it", () => {
   });
 
   it("can write again once the conflict is merged", NEEDS_GIT, async () => {
-    const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
+    const store = await open(conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")]));
     assert.equal(await store.add(annotation("fresh", "src/c.ts")), false);
     assert.equal(await store.resolveConflict(), true);
     assert.equal(await store.add(annotation("fresh", "src/c.ts")), true);
@@ -251,8 +321,31 @@ describe("what the store does about it", () => {
     );
   });
 
+  it("keeps claiming a conflict while another folder still has one", NEEDS_GIT, async () => {
+    const clean = fs.mkdtempSync(nodePath.join(os.tmpdir(), "codelight-clean-"));
+    fs.mkdirSync(nodePath.join(clean, ".vscode"));
+    fs.writeFileSync(
+      nodePath.join(clean, ".vscode", "codelight.json"),
+      serializeStore([annotation("fine", "src/ok.ts")])
+    );
+    workspace.workspaceFolders = [
+      { uri: Uri.file(root), name: "root", index: 0 },
+      { uri: Uri.file(clean), name: "clean", index: 1 }
+    ];
+    const store = await open(
+      conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")])
+    );
+    const last = invoked.filter((call) => call[1] === "codelight.conflicted").pop();
+    assert.deepEqual(last?.[2], true, JSON.stringify(invoked));
+    assert.deepEqual(
+      store.all.map((entry) => entry.id),
+      ["fine"]
+    );
+    fs.rmSync(clean, { recursive: true, force: true });
+  });
+
   it("stops claiming a conflict once the file is fixed by hand", NEEDS_GIT, async () => {
-    const store = await open(conflicted([annotation("mine", "src/a.ts")], [annotation("theirs", "src/b.ts")]));
+    const store = await open(conflicted([BASE, annotation("mine", "src/a.ts")], [BASE, annotation("theirs", "src/b.ts")]));
     assert.equal(store.all.length, 0);
     fs.writeFileSync(
       nodePath.join(root, ".vscode", "codelight.json"),

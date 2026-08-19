@@ -625,12 +625,11 @@ export class FolderStore implements vscode.Disposable {
 
   private clearConflict(): void {
     this.inConflict = false;
-    void vscode.commands.executeCommand("setContext", "codelight.conflicted", false);
   }
 
   private reportConflict(target: vscode.Uri): void {
     this.inConflict = true;
-    void vscode.commands.executeCommand("setContext", "codelight.conflicted", true);
+    this.emitter.fire();
     const message = `CodeLight cannot read ${target.fsPath} because it has an unresolved merge conflict.`;
     if (this.reportedFailure === message) {
       return;
@@ -661,6 +660,9 @@ export class FolderStore implements vscode.Disposable {
         return "skipped";
       }
       const chosen = await this.pick(files);
+      if (generation !== this.generation) {
+        return "skipped";
+      }
       if (chosen.status === "error") {
         this.reportFailure(chosen.message);
         return "skipped";
@@ -700,11 +702,12 @@ export class FolderStore implements vscode.Disposable {
       this.clearConflict();
       this.reportedFailure = undefined;
       const gone =
-        merged.dropped === 0
-          ? ""
-          : ` ${merged.dropped} that one side had deleted stayed deleted.`;
+        merged.dropped === 0 ? "" : ` ${merged.dropped} that one side had deleted stayed deleted.`;
+      const guess = merged.sawBase
+        ? ""
+        : " Git left no record of what the file held before, so a note either side deleted is back.";
       void vscode.window.showInformationMessage(
-        `CodeLight merged the notes in ${target.fsPath}, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.${gone}`
+        `CodeLight merged the notes in ${target.fsPath}, ${merged.annotations.length} of them, from the ${merged.mine} on your side and the ${merged.theirs} on theirs.${gone}${guess} Stage the file with git add once you are happy with it.`
       );
       return "merged";
     }).then(async (outcome) => {
