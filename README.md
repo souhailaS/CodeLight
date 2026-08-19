@@ -27,6 +27,7 @@ CodeLight keeps those notes beside the code rather than inside it. Commit the Co
 * Hide every highlight and comment with one button, and bring them back with the same one.
 * Attach comments to a highlight and reply to your colleagues. A note is labelled with your GitHub account when you are signed in, and with the name git knows you by when you are not, so you can read and annotate offline and without an account. Signing in later leaves the notes you already wrote yours to edit and delete.
 * Read a whole thread by hovering the highlight, with the latest note shown inline at the end of the line.
+* Step from one highlight to the next in the open file with the arrows above **This File**, or from the palette, wrapping round at the end and skipping any highlight this version of the file cannot place. Stepping walks every highlight in the file, including the colours the panel is filtering out. Neither command takes a keyboard shortcut of its own, so bind one in **Preferences: Open Keyboard Shortcuts** if you step through often.
 * Browse every annotation in the project from the activity bar, grouped by file, filtered by colour, and click to jump straight to the text.
 * Give every folder of a multi root workspace its own annotation file, so notes follow the folder they belong to.
 * Keep the notes of each folder in one file under `.vscode`, so they travel through git exactly like the code does. Commit the file to share them, or add it to `.gitignore` to keep them to yourself.

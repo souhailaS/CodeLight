@@ -9,6 +9,7 @@ import { AnnotationTree, Node, nodeId, PanelCommands } from "./panel";
 import { LiveRanges } from "./live";
 import { RenameWatcher } from "./renames";
 import { MarkerMode } from "./marker";
+import { Navigation } from "./navigate";
 import { SignInNudge } from "./nudge";
 import { SharingState } from "./sharing";
 import { FileStatus } from "./statusbar";
@@ -31,6 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = new FileStatus(store, visibility, sharing);
   const comments = new CommentCommands(store, identity, highlights);
   const threads = new ThreadView(store, live, identity, visibility, sharing, nudge);
+  const navigation = new Navigation(store, live, visibility);
   const tree = new AnnotationTree(store, live);
   const panel = new PanelCommands(store, live, tree);
   const view = vscode.window.createTreeView("codelight.annotations", {
@@ -50,6 +52,7 @@ export function activate(context: vscode.ExtensionContext): void {
     renames,
     renderer,
     marker,
+    navigation,
     status,
     visibility,
     vscode.commands.registerCommand("codelight.toggleVisibility", () => {
@@ -112,6 +115,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("codelight.threadDelete", async (comment: ThreadComment) => {
       await threads.deleteComment(comment);
+    }),
+    vscode.commands.registerCommand("codelight.nextHighlight", async () => {
+      await ready;
+      await navigation.step(true);
+    }),
+    vscode.commands.registerCommand("codelight.previousHighlight", async () => {
+      await ready;
+      await navigation.step(false);
     }),
     vscode.commands.registerCommand("codelight.showPanel", async () => {
       await vscode.commands.executeCommand("codelight.annotations.focus");
